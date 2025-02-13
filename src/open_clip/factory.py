@@ -236,6 +236,7 @@ def create_model(
         output_dict: Optional[bool] = None,
         require_pretrained: bool = False,
         load_weights_only: bool = True,
+        strict_load: bool = True,
         **model_kwargs,
 ):
     """Creates and configures a contrastive vision-language model.
@@ -395,7 +396,8 @@ def create_model(
 
         if checkpoint_path:
             logging.info(f'Loading pretrained {model_name} weights ({pretrained}).')
-            load_checkpoint(model, checkpoint_path, weights_only=load_weights_only)
+            loading_info = load_checkpoint(model, checkpoint_path, weights_only=load_weights_only, strict=strict_load)
+            logging.warning(f'Incompatible keys: {loading_info}')
         else:
             error_str = (
                 f'Pretrained weights ({pretrained}) not found for model {model_name}.'
@@ -405,7 +407,8 @@ def create_model(
         pretrained_loaded = True
     elif has_hf_hub_prefix:
         logging.info(f'Loading pretrained {model_name} weights ({checkpoint_path}).')
-        load_checkpoint(model, checkpoint_path, weights_only=load_weights_only)
+        loading_info = load_checkpoint(model, checkpoint_path, weights_only=load_weights_only, strict=strict_load)
+        logging.warning(f'Incompatible keys: {loading_info}')
         pretrained_loaded = True
 
     if require_pretrained and not pretrained_loaded:
@@ -547,6 +550,7 @@ def create_model_from_pretrained(
         return_transform: bool = True,
         cache_dir: Optional[str] = None,
         load_weights_only: bool = True,
+        strict_load: bool = True,
         **model_kwargs,
 ):
     force_preprocess_cfg = merge_preprocess_kwargs(
@@ -570,6 +574,7 @@ def create_model_from_pretrained(
         cache_dir=cache_dir,
         require_pretrained=True,
         load_weights_only=load_weights_only,
+        strict_load=strict_load,
         **model_kwargs,
     )
 
