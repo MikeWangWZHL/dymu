@@ -50,6 +50,11 @@ Note that portions of `src/open_clip/` modelling and tokenizer code are adaptati
 pip install open_clip_torch
 ```
 
+in development mode:
+```
+pip install -e .
+```
+
 ```python
 import torch
 from PIL import Image
