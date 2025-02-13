@@ -56,10 +56,7 @@ image = torch.randn(bs, 3, 384, 384)
 # print("\n\n")
 
 # ===== loading with pretrained weights using open_clip ====
-model, _, preprocess = open_clip.create_model_and_transforms(
-    "ViT-B-16-SigLIP-384-tome", 
-    pretrained='webli', strict_load=False
-)
+model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-16-SigLIP-384-tome", pretrained='webli')
 model.eval()
 tome_vision_encoder = model.visual.trunk
 feat_before_pooling, padding_mask = tome_vision_encoder.forward_features(image)
