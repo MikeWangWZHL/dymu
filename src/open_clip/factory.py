@@ -8,6 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
+import ipdb
 import torch
 
 from .convert import convert_state_dict
@@ -199,6 +200,11 @@ def load_checkpoint(
     # If loading a non-SigLIP model for SigLIP training. See https://github.com/mlfoundations/open_clip/issues/712
     if 'logit_bias' not in state_dict and model.logit_bias is not None:
         state_dict["logit_bias"] = torch.zeros_like(state_dict["logit_scale"])
+    
+    for k, v in model.state_dict().items():
+        if k.endswith(".threshold") and k not in state_dict:
+            state_dict[k] = v
+            print(f'WARNING: Checkpoint does not have {k}, resetting it to {v}.')
 
     # Certain text transformers no longer expect position_ids after transformers==4.31
     position_id_key = 'text.transformer.embeddings.position_ids'
@@ -366,7 +372,7 @@ def create_model(
         model.to(device=device, dtype=dtype)
     else:
         model.to(device=device)
-
+    
     pretrained_loaded = False
     if pretrained:
         checkpoint_path = ''

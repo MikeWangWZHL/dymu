@@ -1098,7 +1098,6 @@ class ToMEVisionTransformer(VisionTransformer):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, padding_mask = self.forward_features(x)
-        import pdb; pdb.set_trace()
         x = self.forward_head(x, padding_mask=padding_mask)
         return x
 
