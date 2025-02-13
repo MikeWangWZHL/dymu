@@ -558,9 +558,9 @@ class ToMEBlock(nn.Module):
             print("setting max r per instance to: ", int(self._tome_info["max_r_per_instance_ratio"] * r))
 
         self.update_threshold = update_threshold
-        if r>0:
-            # self.register_buffer('threshold', torch.tensor(1.0)) # default to be no merging
-            self.threshold = torch.tensor(1.0)
+        # if r>0:
+        self.register_buffer('threshold', torch.tensor(1.0)) # default to be no merging
+        # self.threshold = torch.tensor(1.0)
         self.momentum = 0.1
         self.specified_threshold = specified_threshold
 
@@ -596,7 +596,6 @@ class ToMEBlock(nn.Module):
                     specified_threshold = self.specified_threshold
                 else:
                     specified_threshold = self.threshold
-                # print("using specified threshold: ", specified_threshold)
             else:
                 specified_threshold = None
 
@@ -1097,6 +1096,7 @@ class ToMEVisionTransformer(VisionTransformer):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, padding_mask = self.forward_features(x)
+        import pdb; pdb.set_trace()
         x = self.forward_head(x, padding_mask=padding_mask)
         return x
 
@@ -1171,6 +1171,22 @@ def vit_large_patch14_clip_336_tome(pretrained: bool = False, **kwargs) -> Visio
 
     model = _create_tome_vision_transformer(
         'vit_large_patch14_clip_336',
+        pretrained=pretrained,
+        block_fn=ToMEBlock, **dict(model_args, **kwargs))
+    return model
+
+
+@register_model
+def vit_base_patch16_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
+    model_args = dict(
+        patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
+        merge_mode="batch_level", r_total=12*8, r_schedule="constant"
+    )
+    for key in ("r_total", "r_schedule", "merge_mode"):
+        if key in kwargs:
+            model_args[key] = kwargs.pop(key)
+    model = _create_tome_vision_transformer(
+        'vit_base_patch16_siglip_384',
         pretrained=pretrained,
         block_fn=ToMEBlock, **dict(model_args, **kwargs))
     return model
