@@ -120,6 +120,12 @@ def parse_args(args):
         help="log files on local master, otherwise global master only.",
     )
     parser.add_argument(
+        "--eval_before_training",
+        action="store_true",
+        default=False,
+        help="Evaluate before starting the training process",
+    )
+    parser.add_argument(
         "--name",
         type=str,
         default=None,

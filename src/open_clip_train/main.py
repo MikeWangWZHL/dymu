@@ -476,6 +476,9 @@ def main(args):
 
     loss = create_loss(args)
 
+
+    if any(v in data for v in ('val', 'imagenet-val', 'imagenet-v2')) and args.eval_before_training:
+        evaluate(model, data, 0, args, tb_writer=writer, tokenizer=tokenizer)
     for epoch in range(start_epoch, args.epochs):
         if is_master(args):
             logging.info(f'Start epoch {epoch}')

@@ -460,27 +460,35 @@ class ToMEAttention(Attention):
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k) # (B, num_heads, N, head_dim)
 
-        if self.fused_attn and False:
-            raise NotImplementedError
+        full_bias = None
+        if size is not None:
+            size_bias_log = size.log()[:, :, 0] # (b, src_len, 1) -> (b, src_len)
+            size_bias_log = size_bias_log.unsqueeze(1).unsqueeze(1).expand(B, self.num_heads, N, N) # (b, src_len) -> (b, num_heads, 1, src_len)
+            full_bias = size_bias_log
+        
+        # apply attention mask before softmax (-inf for masked tokens)
+        if attention_mask is not None:
+            if attention_mask.size() != (B, 1, N, N):
+                raise ValueError(
+                    f"Attention mask should be of size {(B, 1, N, N)}, but is {attention_mask.size()}"
+                )
+            if full_bias is None:
+                full_bias = 0
+            full_bias = full_bias + attention_mask
+            
+        if self.fused_attn:
+            x = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=self.attn_drop.p if self.training else 0.,
+                attn_mask=full_bias
+            )
         else:
             q = q * self.scale
             attn = q @ k.transpose(-2, -1) # (B, num_heads, N, N)
             ## apply ToMe proportional attention here
-            if size is not None:
-                size_bias_log = size.log()[:, :, 0] # (b, src_len, 1) -> (b, src_len)
-                size_bias_log = size_bias_log.unsqueeze(1).unsqueeze(1).repeat(1, self.num_heads, 1, 1) # (b, src_len) -> (b, num_heads, 1, src_len)
-                attn = attn + size_bias_log # (B, num_heads, N, N)
-            
-            # apply attention mask before softmax (-inf for masked tokens)
-            if attention_mask is not None:
-                if attention_mask.size() != (B, 1, N, N):
-                    raise ValueError(
-                        f"Attention mask should be of size {(B, 1, N, N)}, but is {attention_mask.size()}"
-                    )
-                attn = attn + attention_mask
-
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
+            attn = attn + full_bias
             x = attn @ v
         
         x = x.transpose(1, 2).reshape(B, N, C)
