@@ -44,19 +44,22 @@ bs = 1
 
 image = torch.randn(bs, 3, 384, 384)
 
-# ===== loading without pretrained weights using timm.create_model ====
-tome_vision_encoder = timm.create_model('vit_base_patch16_siglip_384_tome', pretrained=False, r_total=96) # class token == True for pretrained
-# tome_vision_encoder.eval()
-feat_before_pooling, padding_mask = tome_vision_encoder.forward_features(image)
-print(feat_before_pooling.shape)
-if padding_mask is not None:
-    print("num removed token in batch:", 576 * bs - (padding_mask==0).sum(), "| expected: ", 96 * bs)
-# this is correct: => feat_before_pooling shape: torch.Size([1, 480, 768]) || num removed token in batch: tensor(96) | expected:  96
-# =====================
+# # ===== loading without pretrained weights using timm.create_model ====
+# tome_vision_encoder = timm.create_model('vit_base_patch16_siglip_384_tome', pretrained=False, r_total=96) # class token == True for pretrained
+# # tome_vision_encoder.eval()
+# feat_before_pooling, padding_mask = tome_vision_encoder.forward_features(image)
+# print(feat_before_pooling.shape)
+# if padding_mask is not None:
+#     print("num removed token in batch:", 576 * bs - (padding_mask==0).sum(), "| expected: ", 96 * bs)
+# # this is correct: => feat_before_pooling shape: torch.Size([1, 480, 768]) || num removed token in batch: tensor(96) | expected:  96
+# # =====================
+# print("\n\n")
 
-print("\n\n")
 # ===== loading with pretrained weights using open_clip ====
-model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-16-SigLIP-384-tome", pretrained='webli')
+model, _, preprocess = open_clip.create_model_and_transforms(
+    "ViT-B-16-SigLIP-384-tome", 
+    pretrained='webli', strict_load=False
+)
 model.eval()
 tome_vision_encoder = model.visual.trunk
 feat_before_pooling, padding_mask = tome_vision_encoder.forward_features(image)
