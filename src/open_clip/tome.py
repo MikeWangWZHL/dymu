@@ -488,7 +488,8 @@ class ToMEAttention(Attention):
             ## apply ToMe proportional attention here
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
-            attn = attn + full_bias
+            if full_bias is not None:
+                attn = attn + full_bias
             x = attn @ v
         
         x = x.transpose(1, 2).reshape(B, N, C)
@@ -497,8 +498,6 @@ class ToMEAttention(Attention):
         ## ToMe cosine similarity metric 
         metric = k.view(B, self.num_heads, N, self.head_dim).mean(1)
         return x, metric
-
-
 
 
 class ToMEBlock(nn.Module):
@@ -677,7 +676,10 @@ class ToMEBlock(nn.Module):
 
 class AttentionPoolLatentWMasking(AttentionPoolLatent):
 
-    def forward(self, x, attention_mask=None):
+    def forward(self, x, 
+                attention_mask=None, 
+                size=None # ToMe token size vector
+        ):
         B, N, C = x.shape
 
         if self.pos_embed is not None:
@@ -692,19 +694,25 @@ class AttentionPoolLatentWMasking(AttentionPoolLatent):
 
         q, k = self.q_norm(q), self.k_norm(k)
 
+        full_bias = None
+        if size is not None:
+            size_bias_log = size.log()[:, :, 0] # (b, src_len, 1) -> (b, src_len)
+            size_bias_log = size_bias_log.unsqueeze(1).unsqueeze(1).expand(B, self.num_heads, 1, N) # (b, src_len) -> (b, num_heads, 1, src_len)
+            full_bias = size_bias_log
+
         if attention_mask is not None:
             assert attention_mask.size() == (B, 1, self.latent_len, N) or attention_mask.size() == (B, 1, 1, N), f"Attention mask shape {attention_mask.size()} not compatible with input shape {B, 1, self.latent_len, N}"
-
+            if full_bias is None:
+                full_bias = 0
+            full_bias = full_bias + attention_mask
+        
         if self.fused_attn:
-            if attention_mask is not None:
-                x = F.scaled_dot_product_attention(q, k, v, attn_mask=attention_mask)
-            else:
-                x = F.scaled_dot_product_attention(q, k, v)
+            x = F.scaled_dot_product_attention(q, k, v, attn_mask=full_bias)
         else:
             q = q * self.scale
             attn = q @ k.transpose(-2, -1) # (B, num_heads, N, N)
-            if attention_mask is not None:
-                attn = attn + attention_mask
+            if full_bias is not None:
+                attn = attn + full_bias
             attn = attn.softmax(dim=-1)
             x = attn @ v
         x = x.transpose(1, 2).reshape(B, self.latent_len, C)
@@ -1075,14 +1083,15 @@ class ToMEVisionTransformer(VisionTransformer):
             self._tome_info["size"] = block._tome_info["size"]
             ntoks = (padding_mask<0.5).float().sum(-1)
             self.output_stats[f"block_{idx}_ntoks"] = ntoks.detach()
-        
+        final_size = self._tome_info["size"]
         x = self.norm(x)
-        return x, padding_mask
+        return x, padding_mask, final_size
 
     def pool(self, 
              x: torch.Tensor, 
              pool_type: Optional[str] = None,
-             padding_mask: Optional[torch.Tensor] = None # (B, S) with 0 for valid, 1 for padding
+             padding_mask: Optional[torch.Tensor] = None, # (B, S) with 0 for valid, 1 for padding
+             size: Optional[torch.Tensor] = None # ToMe token size vector
             ) -> torch.Tensor:
         if self.attn_pool is not None:
             if padding_mask is not None:
@@ -1092,7 +1101,7 @@ class ToMEVisionTransformer(VisionTransformer):
                 attn_mask = attn_mask * torch.finfo(x.dtype).min
             else:
                 attn_mask = None
-            x = self.attn_pool(x, attention_mask=attn_mask)
+            x = self.attn_pool(x, attention_mask=attn_mask, size=size)
             return x
         pool_type = self.global_pool if pool_type is None else pool_type
         x = global_pool_nlc_w_masking(x, pool_type=pool_type, num_prefix_tokens=self.num_prefix_tokens, padding_mask=padding_mask)
@@ -1101,15 +1110,16 @@ class ToMEVisionTransformer(VisionTransformer):
     def forward_head(self, 
                      x: torch.Tensor, 
                      pre_logits: bool = False,
-                     padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        x = self.pool(x, padding_mask=padding_mask)
+                     padding_mask: Optional[torch.Tensor] = None,
+                     size: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = self.pool(x, padding_mask=padding_mask, size=size)
         x = self.fc_norm(x)
         x = self.head_drop(x)
         return x if pre_logits else self.head(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, padding_mask = self.forward_features(x)
-        x = self.forward_head(x, padding_mask=padding_mask)
+        x, padding_mask, final_size = self.forward_features(x)
+        x = self.forward_head(x, padding_mask=padding_mask, size=final_size)
         return x
 
 from timm.models.vision_transformer import VisionTransformer, checkpoint_filter_fn, build_model_with_cfg
@@ -1161,8 +1171,8 @@ def vit_base_patch16_siglip_224_tome(pretrained: bool = False, **kwargs) -> Visi
 def vit_base_patch16_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
     model_args = dict(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-        merge_mode="batch_level", r_total=12*8, r_schedule="constant"
-    ) # original # tokens = 14*14 = 196 ; remove 12*8 = 96 tokens
+        merge_mode="batch_level", r_total=12*32, r_schedule="constant"
+    ) # original # tokens = 576 ; remove 12*32 = 384 tokens
 
     # Override specific keys from kwargs if provided
     for key in ("r_total", "r_schedule", "merge_mode"):
