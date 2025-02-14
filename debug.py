@@ -38,18 +38,21 @@ import timm
 import open_clip
 from PIL import Image
 
-bs = 1
 model_name = "ViT-B-16-SigLIP-384-tome"
 model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
-model.eval()
+# model.eval()
 image = preprocess(Image.open("docs/CLIP.png")).unsqueeze(0) # (1, 3, 384, 384)
 
+# image = torch.randn(bs, 3, 384, 384)
+
+
+bs = image.shape[0]
 # ===== loading with pretrained weights using open_clip ====
 tome_vision_encoder = model.visual.trunk
-feat_before_pooling, padding_mask = tome_vision_encoder.forward_features(image)
-print(feat_before_pooling.shape)
+feat_before_pooling, padding_mask, size = tome_vision_encoder.forward_features(image)
+print(feat_before_pooling.shape, size.shape)
 if padding_mask is not None:
-    print("num removed token in batch:", 576 * bs - (padding_mask==0).sum(), "| expected: ", 96 * bs)
+    print("num removed token in batch:", 576 * bs - (padding_mask==0).sum())
 # 
 
 
