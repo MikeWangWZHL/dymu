@@ -1083,6 +1083,7 @@ class ToMEVisionTransformer(VisionTransformer):
         #     x = self.blocks(x)
         
         # using self.blocks as a nn.ModuleList
+        self.output_stats = {}
         padding_mask = None
         for idx, block in enumerate(self.blocks):
             block._tome_info["size"] = self._tome_info["size"]
@@ -1092,7 +1093,8 @@ class ToMEVisionTransformer(VisionTransformer):
                 outputs = block(x, padding_mask=padding_mask)
             x, padding_mask = outputs["hidden_states"], outputs["padding_mask"]
             self._tome_info["size"] = block._tome_info["size"]
-
+            ntoks = (padding_mask<0.5).float().sum(-1)
+            self.output_stats[f"block_{idx}_ntoks"] = ntoks.detach()
         final_size = self._tome_info["size"]
         x = self.norm(x)
         return x, padding_mask, final_size
@@ -1259,6 +1261,22 @@ def vit_large_patch14_clip_336_tome(pretrained: bool = False, **kwargs) -> Visio
 
     model = _create_tome_vision_transformer(
         'vit_large_patch14_clip_336',
+        pretrained=pretrained,
+        block_fn=ToMEBlock, **dict(model_args, **kwargs))
+    return model
+
+
+@register_model
+def vit_base_patch16_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
+    model_args = dict(
+        patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
+        merge_mode="batch_level", r_total=12*32, r_schedule="constant"
+    )
+    for key in ("r_total", "r_schedule", "merge_mode"):
+        if key in kwargs:
+            model_args[key] = kwargs.pop(key)
+    model = _create_tome_vision_transformer(
+        'vit_base_patch16_siglip_384',
         pretrained=pretrained,
         block_fn=ToMEBlock, **dict(model_args, **kwargs))
     return model

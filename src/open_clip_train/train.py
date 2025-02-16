@@ -4,10 +4,13 @@ import math
 import os
 import time
 
+import ipdb
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.nn.parallel.distributed import DistributedDataParallel
+
+from open_clip.tome import ToMEVisionTransformer
 
 try:
     import wandb
@@ -79,6 +82,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
         accum_images, accum_texts, accum_features = [], [], {}
 
     losses_m = {}
+    outputs_m = {}
     batch_time_m = AverageMeter()
     data_time_m = AverageMeter()
     end = time.time()
@@ -94,7 +98,6 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
         texts = texts.to(device=device, non_blocking=True)
 
         data_time_m.update(time.time() - end)
-        optimizer.zero_grad()
 
         if args.accum_freq == 1:
             with autocast():
@@ -110,6 +113,23 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                 losses["loss"] = total_loss
 
             backward(total_loss, scaler)
+        elif args.siglip:
+            with autocast():
+                model_out = model(images, texts)
+                logit_scale = model_out["logit_scale"]
+                if args.distill:
+                    with torch.no_grad():
+                        dist_model_out = dist_model(images, texts)
+                    model_out.update({f'dist_{k}': v for k, v in dist_model_out.items()})
+                losses = loss(**model_out, output_dict=True)
+
+                total_loss = sum(losses.values())
+                losses["loss"] = total_loss
+
+            backward(total_loss, scaler)
+            if ((i + 1) % args.accum_freq) > 0:
+                # FIXME this makes data time logging unreliable when accumulating
+                continue
         else:
             # First, cache the features without any gradient tracking.
             with torch.no_grad():
@@ -183,7 +203,8 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
         # reset gradient accum, if enabled
         if args.accum_freq > 1:
             accum_images, accum_texts, accum_features = [], [], {}
-
+        
+        optimizer.zero_grad()
         # Note: we clamp to 4.6052 = ln(100), as in the original paper.
         with torch.no_grad():
             unwrap_model(model).logit_scale.clamp_(0, math.log(100))
@@ -202,6 +223,16 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                 if key not in losses_m:
                     losses_m[key] = AverageMeter()
                 losses_m[key].update(val.item(), batch_size)
+            
+            if (hasattr(model, "module") and isinstance(model.module.visual.trunk, ToMEVisionTransformer)) or (not hasattr(model, "module") and isinstance(model.visual.trunk, ToMEVisionTransformer)):
+                if hasattr(model, "module"):
+                    trunk = model.module.visual.trunk
+                else:
+                    trunk = model.visual.trunk.blocks
+                outputs_m = trunk.output_stats
+                # for key, value in output_stats.items():
+                #     outputs_m[key].update(value, batch_size)
+                
 
             logit_scale_scalar = logit_scale.item()
             loss_log = " ".join(
@@ -230,6 +261,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                 "lr": optimizer.param_groups[0]["lr"]
             }            
             log_data.update({name:val.val for name,val in losses_m.items()})
+            log_data.update({name:val for name,val in outputs_m.items()})
 
             log_data = {"train/" + name: val for name, val in log_data.items()}
 
