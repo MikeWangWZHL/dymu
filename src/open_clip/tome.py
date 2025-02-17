@@ -675,6 +675,14 @@ class ToMEBlock(nn.Module):
 
 class AttentionPoolLatentWMasking(AttentionPoolLatent):
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)  # Ensure parent initialization
+
+        # Ensure `self.latent` has correct shape (at least [1, 1, embed_dim])
+        if self.latent_len == 0:
+            self.latent = nn.Parameter(torch.randn(1, 1, self.latent_dim))  # Ensure non-empty tensor
+        print("attn_pool: self.latent.shape:", self.latent.shape)
+
     def forward(self, x, 
                 attention_mask=None, 
                 size=None # ToMe token size vector
@@ -1266,20 +1274,20 @@ def vit_large_patch14_clip_336_tome(pretrained: bool = False, **kwargs) -> Visio
     return model
 
 
-@register_model
-def vit_base_patch16_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-    model_args = dict(
-        patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-        merge_mode="batch_level", r_total=12*32, r_schedule="constant"
-    )
-    for key in ("r_total", "r_schedule", "merge_mode"):
-        if key in kwargs:
-            model_args[key] = kwargs.pop(key)
-    model = _create_tome_vision_transformer(
-        'vit_base_patch16_siglip_384',
-        pretrained=pretrained,
-        block_fn=ToMEBlock, **dict(model_args, **kwargs))
-    return model
+# @register_model
+# def vit_base_patch16_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
+#     model_args = dict(
+#         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
+#         merge_mode="batch_level", r_total=12*32, r_schedule="constant"
+#     )
+#     for key in ("r_total", "r_schedule", "merge_mode"):
+#         if key in kwargs:
+#             model_args[key] = kwargs.pop(key)
+#     model = _create_tome_vision_transformer(
+#         'vit_base_patch16_siglip_384',
+#         pretrained=pretrained,
+#         block_fn=ToMEBlock, **dict(model_args, **kwargs))
+#     return model
 
 
 
