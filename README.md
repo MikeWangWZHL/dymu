@@ -1,3 +1,14 @@
+# TOME instructions
+
+## Add a new model config compatible with open_clip.create_model_and_transforms
+
+1. Add a register function in `src/open_clip/tome.py`, see example at "def vit_base_patch16_siglip_224_tome"
+
+2. Add a JSON config in `src/open_clip/model_configs`; copy an existing one such as `ViT-B-16-SigLIP-384-tome.json`, modify the "timm_model_name" to the function name in step 1 and rename it to the new model name
+
+3. Add an entry in the dict "_PRETRAINED" in `src/open_clip/pretrained.py` to specify the pretrained weights
+
+
 # OpenCLIP
 
 [[Paper]](https://arxiv.org/abs/2212.07143) [[Citations]](#citing) [[Clip Colab]](https://colab.research.google.com/github/mlfoundations/open_clip/blob/master/docs/Interacting_with_open_clip.ipynb) [[Coca Colab]](https://colab.research.google.com/github/mlfoundations/open_clip/blob/master/docs/Interacting_with_open_coca.ipynb)

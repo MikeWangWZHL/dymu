@@ -5,20 +5,23 @@ import timm
 import open_clip
 from PIL import Image
 
-model_name = "ViT-B-16-SigLIP-384-tome"
+# model_name = "ViT-B-16-SigLIP-384-tome"
+# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
+model_name = "ViT-B-16-SigLIP-384-tome-no-merge"
 model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
+
 # model.eval()
 # img_paths = [
-#     "/shared/nas/data/m1/wangz3/salesforce_intern/llava_1_5_data/stage1/00453/004539375.jpg",
-#     "/shared/nas/data/m1/wangz3/salesforce_intern/llava_1_5_data/stage1/00594/005947502.jpg"
+#     "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00453/004539375.jpg",
+#     "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00594/005947502.jpg"
 # ]
 img_paths = [
-    "/shared/nas/data/m1/wangz3/salesforce_intern/llava_1_5_data/stage1/00453/004539375.jpg",
-    "/shared/nas/data/m1/wangz3/salesforce_intern/llava_1_5_data/stage1/00511/005116462.jpg"
+    "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00453/004539375.jpg",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00511/005116462.jpg"
 ]
 # img_paths = [
-#     "/shared/nas/data/m1/wangz3/salesforce_intern/llava_1_5_data/stage1/00453/004539375.jpg",
-#     "/shared/nas/data/m1/wangz3/salesforce_intern/llava_1_5_data/stage1/00223/002239345.jpg"
+#     "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00453/004539375.jpg",
+#     "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00223/002239345.jpg"
 # ]
 
 # image = preprocess(Image.open("docs/CLIP.png")).unsqueeze(0)
@@ -36,7 +39,8 @@ outputs = tome_vision_encoder.forward_features_all_layers(image)
 
 hidden_states = outputs.hidden_states
 padding_masks = outputs.padding_masks # b, n
-print((padding_masks[-1]==0).sum())
+if padding_masks[-1] is not None:
+    print((padding_masks[-1]==0).sum())
 import pdb; pdb.set_trace()
 # image = torch.randn(bs, 3, 384, 384)
 
