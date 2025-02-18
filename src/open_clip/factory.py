@@ -181,7 +181,7 @@ def load_checkpoint(
         return {}
 
     state_dict = load_state_dict(checkpoint_path, device=device, weights_only=weights_only)
-
+    
     # Detect & convert 3rd party state_dicts -> open_clip
     state_dict = convert_state_dict(model, state_dict)
 

@@ -220,6 +220,7 @@ def batch_level_bipartite_soft_matching(
         return do_nothing, do_nothing
 
     with torch.no_grad():
+        
         # compute scores within instance
         metric = metric / metric.norm(dim=-1, keepdim=True) # (b, s, c)
         # print(metric)
@@ -314,7 +315,8 @@ def batch_level_bipartite_soft_matching(
             if include_self:
                 # Include original dst values in the mean calculation
                 sum_dst_flat += dst_flat
-                counts += (dst_flat != 0).float()
+                # counts += (dst_flat != 0).float()
+                counts += (dst_flat != 0).to(counts.dtype)
 
             # Avoid division by zero
             counts = counts.clamp(min=1)
@@ -433,7 +435,8 @@ def batch_level_merge_wavg(
     x = x / size
 
     # Truncate to the maximum length
-    max_len = int((1 - padding_mask).sum(dim=-1).max().item())
+    # max_len = int((1 - padding_mask).sum(dim=-1).max().item()) # this causes incorrect max_len calculation
+    max_len = int((1 - padding_mask).to(torch.int64).sum(dim=-1).max().item())
     x = x[:, :max_len]
     padding_mask = padding_mask[:, :max_len]
     size = size[:, :max_len]
@@ -444,14 +447,10 @@ def batch_level_merge_source(
 ) -> torch.Tensor:
     raise NotImplementedError("Unmerge not implemented yet.")
 
-
-
 ##
 
 
 class ToMEAttention(Attention):
-
-
     def forward(self, x: torch.Tensor, size: Optional[torch.Tensor] = None, # ToMe token size vector
                 attention_mask: Optional[torch.Tensor] = None,
                 ) -> torch.Tensor:
@@ -676,6 +675,14 @@ class ToMEBlock(nn.Module):
 
 class AttentionPoolLatentWMasking(AttentionPoolLatent):
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)  # Ensure parent initialization
+
+        # Ensure `self.latent` has correct shape (at least [1, 1, embed_dim])
+        if self.latent_len == 0:
+            self.latent = nn.Parameter(torch.randn(1, 1, self.latent_dim))  # Ensure non-empty tensor
+        print("attn_pool: self.latent.shape:", self.latent.shape)
+
     def forward(self, x, 
                 attention_mask=None, 
                 size=None # ToMe token size vector
@@ -789,6 +796,19 @@ def global_pool_nlc_w_masking(
             raise ValueError(f'Unknown pool type {pool_type}')
 
     return x
+
+
+from dataclasses import dataclass
+from transformers.modeling_outputs import ModelOutput
+from typing import Optional, Tuple
+
+@dataclass
+class CLIPVisionEncoderToMEOutput(ModelOutput):
+    last_hidden_state: torch.FloatTensor = None
+    pooler_output: Optional[torch.FloatTensor] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    sizes: Optional[Tuple[torch.FloatTensor, ...]] = None
+    padding_masks: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 class ToMEVisionTransformer(VisionTransformer):
     """ Vision Transformer
@@ -1087,6 +1107,42 @@ class ToMEVisionTransformer(VisionTransformer):
         x = self.norm(x)
         return x, padding_mask, final_size
 
+    def forward_features_all_layers(self, x: torch.Tensor # (B, C, H, W)
+                                    ) -> torch.Tensor:
+        # for enable getting intermediate features for llava-style model
+        self._tome_info["size"] = None
+        self._tome_info["source"] = None
+
+        x = self.patch_embed(x)
+        x = self._pos_embed(x)
+        x = self.patch_drop(x)
+        x = self.norm_pre(x)
+        
+        # using self.blocks as a nn.ModuleList
+        hidden_states = []
+        padding_masks = []
+        sizes = []
+        padding_mask = None
+        for idx, block in enumerate(self.blocks):
+            block._tome_info["size"] = self._tome_info["size"]
+            if self.grad_checkpointing and not torch.jit.is_scripting():
+                outputs = checkpoint(block, x, padding_mask)
+            else:
+                outputs = block(x, padding_mask=padding_mask)
+            x, padding_mask = outputs["hidden_states"], outputs["padding_mask"]
+            self._tome_info["size"] = block._tome_info["size"]
+            hidden_states.append(x)
+            padding_masks.append(padding_mask)
+            sizes.append(self._tome_info["size"])
+        
+        x = self.norm(x)
+        return CLIPVisionEncoderToMEOutput(
+            last_hidden_state=x,
+            hidden_states=tuple(hidden_states),
+            padding_masks=tuple(padding_masks),
+            sizes=tuple(sizes)
+        )
+
     def pool(self, 
              x: torch.Tensor, 
              pool_type: Optional[str] = None,
@@ -1149,6 +1205,24 @@ def _create_tome_vision_transformer(variant: str, pretrained: bool = False, **kw
 
 
 @register_model
+def vit_base_patch16_siglip_384_tome_no_merge(pretrained: bool = False, **kwargs) -> VisionTransformer:
+    model_args = dict(
+        patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
+        merge_mode="batch_level", r_total=0, r_schedule="constant"
+    ) # no merge; 
+    # Override specific keys from kwargs if provided
+    for key in ("r_total", "r_schedule", "merge_mode"):
+        if key in kwargs:
+            model_args[key] = kwargs.pop(key)
+
+    model = _create_tome_vision_transformer(
+        'vit_base_patch16_siglip_384', 
+        pretrained=pretrained, 
+        block_fn=ToMEBlock, **dict(model_args, **kwargs))
+    return model
+
+
+@register_model
 def vit_base_patch16_siglip_224_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
     model_args = dict(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
@@ -1199,7 +1273,7 @@ def vit_large_patch14_clip_336_tome(pretrained: bool = False, **kwargs) -> Visio
 
 
 
-
+### no merge classes for baseline llava ###
 @register_model
 def vit_base_patch16_siglip_384_tome_480out(pretrained: bool = False, **kwargs) -> VisionTransformer:
     model_args = dict(
@@ -1247,17 +1321,19 @@ def vit_base_patch16_siglip_384_tome_384out(pretrained: bool = False, **kwargs) 
 def vit_base_patch16_siglip_384_tome_192out(pretrained: bool = False, **kwargs) -> VisionTransformer:
     model_args = dict(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-        merge_mode="batch_level", r_total=12*32, r_schedule="constant"
-    )
+        merge_mode="batch_level", r_total=0, r_schedule="constant"
+    ) # no merge; 
+    # Override specific keys from kwargs if provided
     for key in ("r_total", "r_schedule", "merge_mode"):
         if key in kwargs:
             model_args[key] = kwargs.pop(key)
+
     model = _create_tome_vision_transformer(
-        'vit_base_patch16_siglip_384',
-        pretrained=pretrained,
+        'vit_base_patch16_siglip_384', 
+        pretrained=pretrained, 
         block_fn=ToMEBlock, **dict(model_args, **kwargs))
     return model
-
+### 
 
 
 # @register_model
