@@ -1101,6 +1101,7 @@ class ToMEVisionTransformer(VisionTransformer):
                 outputs = block(x, padding_mask=padding_mask)
             x, padding_mask = outputs["hidden_states"], outputs["padding_mask"]
             self._tome_info["size"] = block._tome_info["size"]
+            ipdb.set_trace()
             ntoks = (padding_mask<0.5).float().sum(-1)
             self.output_stats[f"block_{idx}_ntoks"] = ntoks.detach()
         final_size = self._tome_info["size"]
@@ -1321,7 +1322,7 @@ def vit_base_patch16_siglip_384_tome_384out(pretrained: bool = False, **kwargs) 
 def vit_base_patch16_siglip_384_tome_192out(pretrained: bool = False, **kwargs) -> VisionTransformer:
     model_args = dict(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-        merge_mode="batch_level", r_total=0, r_schedule="constant"
+        merge_mode="batch_level", r_total=12*32, r_schedule="constant"
     ) # no merge; 
     # Override specific keys from kwargs if provided
     for key in ("r_total", "r_schedule", "merge_mode"):
@@ -1333,107 +1334,3 @@ def vit_base_patch16_siglip_384_tome_192out(pretrained: bool = False, **kwargs) 
         pretrained=pretrained, 
         block_fn=ToMEBlock, **dict(model_args, **kwargs))
     return model
-### 
-
-
-# @register_model
-# def vit_base_patch16_siglip_224_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_base_patch16_siglip_224', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_base_patch16_siglip_256_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_base_patch16_siglip_256', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_base_patch16_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_base_patch16_siglip_384', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_base_patch16_siglip_512_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_base_patch16_siglip_512', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_large_patch16_siglip_256_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=16, embed_dim=1024, depth=24, num_heads=16, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_large_patch16_siglip_256', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_large_patch16_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=16, embed_dim=1024, depth=24, num_heads=16, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_large_patch16_siglip_384', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_so400m_patch14_siglip_224_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=14, embed_dim=1152, depth=27, num_heads=16, mlp_ratio=3.7362, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_so400m_patch14_siglip_224', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_so400m_patch16_siglip_256_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     # this is a corrected variant of the 384 with a res properly divisible by patch size (no padding/truncation)
-#     model_args = dict(
-#         patch_size=16, embed_dim=1152, depth=27, num_heads=16, mlp_ratio=3.7362, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_so400m_patch16_siglip_256', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_so400m_patch14_siglip_378_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     # this is a corrected variant of the 384 with a res properly divisible by patch size (no padding/truncation)
-#     model_args = dict(
-#         patch_size=14, embed_dim=1152, depth=27, num_heads=16, mlp_ratio=3.7362, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_so400m_patch14_siglip_378', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
-
-# @register_model
-# def vit_so400m_patch14_siglip_384_tome(pretrained: bool = False, **kwargs) -> VisionTransformer:
-#     model_args = dict(
-#         patch_size=14, embed_dim=1152, depth=27, num_heads=16, mlp_ratio=3.7362, class_token=False, global_pool='map',
-#     )
-#     model = _create_vision_transformer(
-#         'vit_so400m_patch14_siglip_384', pretrained=pretrained, block_fn=partial(ToMEBlock, merge_mode="batch_level", r=32), **dict(model_args, **kwargs))
-#     return model
-
