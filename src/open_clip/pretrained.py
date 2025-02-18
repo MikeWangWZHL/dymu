@@ -491,6 +491,15 @@ _PRETRAINED = {
     "ViT-B-16-SigLIP-384-tome": dict(
         webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
     ),
+    "ViT-B-16-SigLIP-384-tome-192out": dict(
+        webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
+    ),
+    "ViT-B-16-SigLIP-384-tome-384out": dict(
+        webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
+    ),
+    "ViT-B-16-SigLIP-384-tome-480out": dict(
+        webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
+    ),
     "ViT-B-16-SigLIP-512": dict(
         webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-512/'),
     ),
