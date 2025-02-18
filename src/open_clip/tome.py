@@ -1101,8 +1101,10 @@ class ToMEVisionTransformer(VisionTransformer):
                 outputs = block(x, padding_mask=padding_mask)
             x, padding_mask = outputs["hidden_states"], outputs["padding_mask"]
             self._tome_info["size"] = block._tome_info["size"]
-            ipdb.set_trace()
-            ntoks = (padding_mask<0.5).float().sum(-1)
+            if padding_mask is not None:
+                ntoks = (padding_mask<0.5).float().sum(-1)
+            else:
+                ntoks = x.shape[1]
             self.output_stats[f"block_{idx}_ntoks"] = ntoks.detach()
         final_size = self._tome_info["size"]
         x = self.norm(x)
