@@ -862,7 +862,8 @@ class ToMEVisionTransformer(VisionTransformer):
             r_schedule: str = "constant", # r schedule: constant, linear, reverse_linear
             max_r_per_instance_ratio: float = None, # 1.0 => rever to fixed r for each instance; > 1.0 => dynamic r
             update_threshold: bool = False, # whether to post-hoc update threshold after training
-            specified_thresholds: List[float] = None # specified threshold for each layer
+            specified_thresholds: List[float] = None, # specified threshold for each layer
+            **kwargs
     ) -> None:
         """
         Args:
@@ -1195,7 +1196,7 @@ def _create_tome_vision_transformer(variant: str, pretrained: bool = False, **kw
     strict = kwargs.pop('pretrained_strict', True)
     if 'siglip' in variant and kwargs.get('global_pool', None) != 'map':
         strict = False
-
+    print("Create ToME Vision Transformer with kwargs: ", kwargs)
     return build_model_with_cfg(
         ToMEVisionTransformer,
         variant,
@@ -1325,7 +1326,7 @@ def vit_base_patch16_siglip_384_tome_192out(pretrained: bool = False, **kwargs) 
     model_args = dict(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
         merge_mode="batch_level", r_total=12*32, r_schedule="constant"
-    ) # no merge; 
+    )
     # Override specific keys from kwargs if provided
     for key in ("r_total", "r_schedule", "merge_mode"):
         if key in kwargs:

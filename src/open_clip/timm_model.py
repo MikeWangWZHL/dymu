@@ -43,6 +43,7 @@ class TimmModel(nn.Module):
             drop_path=None,
             patch_drop=None,
             pretrained=False,
+            **kwargs
     ):
         super().__init__()
         if timm is None:
@@ -50,7 +51,7 @@ class TimmModel(nn.Module):
         self.image_size = to_2tuple(image_size)
 
         # setup kwargs that may not be common across all models
-        timm_kwargs = {}
+        timm_kwargs = kwargs.copy() if kwargs is not None else {}
         if drop_path is not None:
             timm_kwargs['drop_path_rate'] = drop_path
         if patch_drop is not None:

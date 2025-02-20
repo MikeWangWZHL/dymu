@@ -99,6 +99,7 @@ class CoCa(nn.Module):
             nonscalar_logit_scale: bool = False,
             cast_dtype: Optional[torch.dtype] = None,
             pad_id: int = 0,
+            **kwargs
     ):
         super().__init__()
         multimodal_cfg = MultimodalCfg(**multimodal_cfg) if isinstance(multimodal_cfg, dict) else multimodal_cfg
@@ -123,6 +124,7 @@ class CoCa(nn.Module):
             vision_cfg=vision_cfg,
             quick_gelu=quick_gelu,
             cast_dtype=cast_dtype,
+            **kwargs
         )
 
         self.text_decoder = _build_text_decoder_tower(

@@ -4,12 +4,33 @@ import torch
 import timm
 import open_clip
 from PIL import Image
+import os
 
 # model_name = "ViT-B-16-SigLIP-384-tome"
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
-model_name = "ViT-B-16-SigLIP-384-tome-no-merge"
-model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
 
+# model_name = "ViT-B-16-SigLIP-384-tome-no-merge"
+# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
+
+model_name = "ViT-B-16-SigLIP-384-tome-192out"
+# timm_kwargs = {"r_total": 0}
+timm_kwargs = {
+    'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_192out_updated_thresh/vision_checkpoint/epoch_9.pt",
+    # 'pretrained': "webli",
+    # 'r_total': 0,
+    # 'specified_thresholds': [1.0] * 12
+}
+# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli', **timm_kwargs)
+model, _, preprocess = open_clip.create_model_and_transforms(model_name, **timm_kwargs)
+print()
+model.eval()
+
+learned_thresholds = []
+for i, block in enumerate(model.visual.trunk.blocks):
+    # print(block.threshold)
+    learned_thresholds.append(block.threshold.item())
+print(learned_thresholds)
+import pdb; pdb.set_trace()
 # model.eval()
 # img_paths = [
 #     "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00453/004539375.jpg",
@@ -29,8 +50,12 @@ image = [preprocess(Image.open(p)) for p in img_paths] # (2, 3, 384, 384)
 image = torch.stack(image, dim=0)
 
 tome_vision_encoder = model.visual.trunk
-tome_vision_encoder.to(dtype=torch.bfloat16)
-image = image.to(dtype=torch.bfloat16)
+# tome_vision_encoder.to(dtype=torch.bfloat16)
+# image = image.to(dtype=torch.bfloat16)
+tome_vision_encoder.to("cuda:3")
+tome_vision_encoder.to(dtype=torch.float16)
+image = image.to("cuda:3")
+image = image.to(dtype=torch.float16)
 
 for name, param in tome_vision_encoder.named_parameters():
     print(f"{name}: {param.dtype}")

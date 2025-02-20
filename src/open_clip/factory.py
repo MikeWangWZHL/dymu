@@ -173,6 +173,7 @@ def load_checkpoint(
         strict: bool = True,
         weights_only: bool = True,
         device='cpu',
+        skip_loading_pretrained_thresholds: bool = False,
 ):
     if Path(checkpoint_path).suffix in ('.npz', '.npy'):
         # Separate path loading numpy big_vision (SigLIP) weights
@@ -205,6 +206,9 @@ def load_checkpoint(
         if k.endswith(".threshold") and k not in state_dict:
             state_dict[k] = v
             print(f'WARNING: Checkpoint does not have {k}, resetting it to {v}.')
+        if k.endswith(".threshold") and skip_loading_pretrained_thresholds:
+            state_dict[k] = v
+            print(f'WARNING: Skipping loading of pretrained threshold {k}, resetting it to {v}.')
 
     # Certain text transformers no longer expect position_ids after transformers==4.31
     position_id_key = 'text.transformer.embeddings.position_ids'
@@ -374,6 +378,11 @@ def create_model(
     else:
         model.to(device=device)
     
+    ## for tome model customization during inference ##
+    specified_thresholds = model_kwargs.get('specified_thresholds', None)
+    skip_loading_pretrained_thresholds = True if specified_thresholds is not None else False
+    ##
+    
     pretrained_loaded = False
     if pretrained:
         checkpoint_path = ''
@@ -396,7 +405,8 @@ def create_model(
 
         if checkpoint_path:
             logging.info(f'Loading pretrained {model_name} weights ({pretrained}).')
-            loading_info = load_checkpoint(model, checkpoint_path, weights_only=load_weights_only, strict=strict_load)
+            loading_info = load_checkpoint(model, checkpoint_path, weights_only=load_weights_only, 
+                                           strict=strict_load, skip_loading_pretrained_thresholds=skip_loading_pretrained_thresholds)
             logging.warning(f'Incompatible keys: {loading_info}')
         else:
             error_str = (
@@ -407,7 +417,8 @@ def create_model(
         pretrained_loaded = True
     elif has_hf_hub_prefix:
         logging.info(f'Loading pretrained {model_name} weights ({checkpoint_path}).')
-        loading_info = load_checkpoint(model, checkpoint_path, weights_only=load_weights_only, strict=strict_load)
+        loading_info = load_checkpoint(model, checkpoint_path, weights_only=load_weights_only, 
+                                       strict=strict_load, skip_loading_pretrained_thresholds=skip_loading_pretrained_thresholds)
         logging.warning(f'Incompatible keys: {loading_info}')
         pretrained_loaded = True
 
