@@ -208,7 +208,7 @@ def load_checkpoint(
             print(f'WARNING: Checkpoint does not have {k}, resetting it to {v}.')
         if k.endswith(".threshold") and skip_loading_pretrained_thresholds:
             state_dict[k] = v
-            print(f'WARNING: Skipping loading of pretrained threshold {k}, resetting it to {v}.')
+            print(f'WARNING: Skipping loading of pretrained threshold {k}, using specified_thresholds.')
 
     # Certain text transformers no longer expect position_ids after transformers==4.31
     position_id_key = 'text.transformer.embeddings.position_ids'
@@ -346,6 +346,7 @@ def create_model(
     custom_text = model_cfg.pop('custom_text', False) or force_custom_text or is_hf_model
 
     model_cfg = dict(model_cfg, **model_kwargs)  # merge cfg dict w/ kwargs (kwargs overrides cfg)
+
     if custom_text:
         if "multimodal_cfg" in model_cfg:
             model = CoCa(**model_cfg, cast_dtype=cast_dtype)

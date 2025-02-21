@@ -1104,9 +1104,10 @@ class ToMEVisionTransformer(VisionTransformer):
             self._tome_info["size"] = block._tome_info["size"]
             if padding_mask is not None:
                 ntoks = (padding_mask<0.5).float().sum(-1)
+                ntoks = ntoks.detach().tolist()
             else:
-                ntoks = x.shape[1]
-            self.output_stats[f"block_{idx}_ntoks"] = ntoks.detach()
+                ntoks = [x.shape[1]]*x.shape[0]
+            self.output_stats[f"block_{idx}_ntoks"] = ntoks
         final_size = self._tome_info["size"]
         x = self.norm(x)
         return x, padding_mask, final_size
@@ -1127,6 +1128,7 @@ class ToMEVisionTransformer(VisionTransformer):
         padding_masks = []
         sizes = []
         padding_mask = None
+        self.output_stats = {}
         for idx, block in enumerate(self.blocks):
             block._tome_info["size"] = self._tome_info["size"]
             if self.grad_checkpointing and not torch.jit.is_scripting():
@@ -1138,6 +1140,13 @@ class ToMEVisionTransformer(VisionTransformer):
             hidden_states.append(x)
             padding_masks.append(padding_mask)
             sizes.append(self._tome_info["size"])
+            # track number of tokens after each block
+            if padding_mask is not None:
+                ntoks = (padding_mask<0.5).float().sum(-1)
+                ntoks = ntoks.detach().tolist()
+            else:
+                ntoks = [x.shape[1]]*x.shape[0]
+            self.output_stats[f"block_{idx}_ntoks"] = ntoks
         
         x = self.norm(x)
         return CLIPVisionEncoderToMEOutput(

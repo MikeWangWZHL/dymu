@@ -61,6 +61,7 @@ class TimmModel(nn.Module):
         if proj:
             assert proj in ("linear", "mlp", "none")
         extra_proj = proj in ("linear", "mlp")
+
         if not extra_proj and not custom_pool:
             # use network classifier head as projection if no proj specified and no custom pooling used
             # if projection is explicitly set to "none" will be pass through from network trunk
