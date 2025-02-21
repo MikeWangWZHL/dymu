@@ -1346,3 +1346,21 @@ def vit_base_patch16_siglip_384_tome_192out(pretrained: bool = False, **kwargs) 
         pretrained=pretrained, 
         block_fn=ToMEBlock, **dict(model_args, **kwargs))
     return model
+
+
+@register_model
+def vit_base_patch16_siglip_384_tome_72out(pretrained: bool = False, **kwargs) -> VisionTransformer:
+    model_args = dict(
+        patch_size=16, embed_dim=768, depth=12, num_heads=12, class_token=False, global_pool='map',
+        merge_mode="batch_level", r_total=12*42, r_schedule="constant"
+    )
+    # Override specific keys from kwargs if provided
+    for key in ("r_total", "r_schedule", "merge_mode"):
+        if key in kwargs:
+            model_args[key] = kwargs.pop(key)
+
+    model = _create_tome_vision_transformer(
+        'vit_base_patch16_siglip_384', 
+        pretrained=pretrained, 
+        block_fn=ToMEBlock, **dict(model_args, **kwargs))
+    return model
