@@ -4,9 +4,11 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union
 from functools import partial
 
 import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
+
+from open_clip.tome import batch_level_bipartite_soft_matching, batch_level_merge_wavg, bipartite_soft_matching, merge_source, merge_wavg
 
 from .utils import to_2tuple
 from .pos_embed import get_2d_sincos_pos_embed
@@ -265,6 +267,208 @@ class ResidualAttentionBlock(nn.Module):
         return x
 
 
+class ToMEMultiheadAttention(nn.MultiheadAttention):
+    def forward(
+        self,
+       query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        size:Optional[Tensor]=None,
+        need_weights: bool = True,
+        attn_mask: Optional[Tensor] = None):
+        assert self.batch_first
+        B = query.shape[0]
+        N = query.shape[1]
+        full_bias = None
+        if size is not None:
+            size_bias_log = size.log()[:, :, 0] # (b, src_len, 1) -> (b, src_len)
+            size_bias_log = size_bias_log.unsqueeze(1).unsqueeze(1).expand(B, self.num_heads, N, N) # (b, src_len) -> (b, num_heads, 1, src_len)
+            full_bias = size_bias_log
+        
+        # apply attention mask before softmax (-inf for masked tokens)
+        if attn_mask is not None:
+            if attn_mask.size() != (B, 1, N, N):
+                raise ValueError(
+                    f"Attention mask should be of size {(B, 1, N, N)}, but is {attn_mask.size()}"
+                )
+            if full_bias is None:
+                full_bias = 0
+            full_bias = full_bias + attn_mask
+        return super().forward(query=query, key=key, value=value, attn_mask=full_bias, need_weights=need_weights)
+
+
+
+class ToMEResidualAttentionBlock(nn.Module):
+    def __init__(
+            self,
+            d_model: int,
+            n_head: int,
+            mlp_ratio: float = 4.0,
+            ls_init_value: float = None,
+            act_layer: Callable = nn.GELU,
+            norm_layer: Callable = LayerNorm,
+            is_cross_attention: bool = False,
+            batch_first: bool = True,
+            # TOME args
+            trace_source: bool = False,
+            prop_attn: bool = True,
+            cls_token: bool = True,
+            r: int = 0,
+            merge_mode: str = "instance_level",
+            max_r_per_instance_ratio: float = None,
+            update_threshold: bool = False,
+            specified_threshold: float = None
+
+    ):
+        super().__init__()
+
+        self.ln_1 = norm_layer(d_model)
+        self.attn = ToMEMultiheadAttention(d_model, n_head, batch_first=batch_first)
+        self.ls_1 = LayerScale(d_model, ls_init_value) if ls_init_value is not None else nn.Identity()
+        if is_cross_attention:
+            self.ln_1_kv = norm_layer(d_model)
+
+        self.ln_2 = norm_layer(d_model)
+        mlp_width = int(d_model * mlp_ratio)
+        self.mlp = nn.Sequential(OrderedDict([
+            ("c_fc", nn.Linear(d_model, mlp_width)),
+            ("gelu", act_layer()),
+            ("c_proj", nn.Linear(mlp_width, d_model))
+        ]))
+        self.ls_2 = LayerScale(d_model, ls_init_value) if ls_init_value is not None else nn.Identity()
+        # ToMe configs
+        self._tome_info = {
+            "r": r, # number of tokens to remove
+            "size": None,
+            "source": None,
+            "trace_source": trace_source,
+            "prop_attn": prop_attn,
+            "class_token": cls_token,
+            "distill_token": False,
+            "merge_mode": merge_mode,
+            "max_r_per_instance_ratio": max_r_per_instance_ratio,
+        }
+        if max_r_per_instance_ratio is not None:
+            print("setting max r per instance to: ", int(self._tome_info["max_r_per_instance_ratio"] * r))
+
+        self.update_threshold = update_threshold
+        # if r>0:
+        self.register_buffer('threshold', torch.tensor(1.0)) # default to be no merging
+        self.momentum = 0.1
+        self.specified_threshold = specified_threshold
+
+    def attention(
+            self,
+            q_x: torch.Tensor,
+            k_x: Optional[torch.Tensor] = None,
+            v_x: Optional[torch.Tensor] = None,
+            attn_mask: Optional[torch.Tensor] = None,
+    ):
+        k_x = k_x if k_x is not None else q_x
+        v_x = v_x if v_x is not None else q_x
+        attn_size = self._tome_info["size"] if self._tome_info["prop_attn"] else None
+        attn_mask = attn_mask.to(q_x.dtype) if attn_mask is not None else None
+        attn_out = self.attn(
+            q_x, k_x, v_x, need_weights=False, size =attn_size, attn_mask=attn_mask
+        )[0]
+        metric = k_x
+        return attn_out, metric
+
+    def threshold_running_avg(self, new_value):
+        if new_value is not None:
+            with torch.no_grad():
+                if torch.all(self.threshold == 1.0):
+                    self.threshold = new_value
+                else:
+                    if new_value.device != self.threshold.device:
+                        new_value = new_value.to(self.threshold.device)
+                    self.threshold = (1-self.momentum) * self.threshold + self.momentum * new_value
+        
+    def merge_tokens(self, metric, r, hidden_states, padding_mask=None):
+        if self._tome_info["merge_mode"] == "instance_level":
+            merge, _ = bipartite_soft_matching(
+                metric,
+                r,
+                self._tome_info["class_token"],
+                self._tome_info["distill_token"],
+            )
+            if self._tome_info["trace_source"]:
+                self._tome_info["source"] = merge_source(
+                    merge, hidden_states, self._tome_info["source"]
+                )
+            hidden_states, self._tome_info["size"] = merge_wavg(
+                merge, hidden_states, self._tome_info["size"]
+            )
+        elif self._tome_info["merge_mode"] == "batch_level":
+
+            if not self.training and not self.update_threshold:
+                if self.specified_threshold is not None:
+                    specified_threshold = self.specified_threshold
+                else:
+                    specified_threshold = self.threshold
+            else:
+                specified_threshold = None
+
+            if self._tome_info["max_r_per_instance_ratio"] is None:
+                max_r_per_instance = None
+            else:
+                max_r_per_instance = int(self._tome_info["max_r_per_instance_ratio"] * r)
+            merge, _, batch_threshold = batch_level_bipartite_soft_matching(
+                metric,
+                r,
+                self._tome_info["class_token"],
+                self._tome_info["distill_token"],
+                padding_mask = padding_mask,
+                max_r_per_instance = max_r_per_instance,
+                specified_threshold = specified_threshold
+            )
+            
+            hidden_states, self._tome_info["size"], padding_mask = batch_level_merge_wavg(
+                merge, hidden_states, self._tome_info["size"]
+            )
+            if self.training or self.update_threshold:
+                self.threshold_running_avg(batch_threshold)
+            
+        return hidden_states, padding_mask
+
+    def _get_attn_mask_from_padding_mask(self, padding_mask, dtype):
+        """
+            input: padding mask: (b, s): 0 for non-padding, 1 for padding
+            output: attention mask: (b, 1, s, s): 0 for non-padding, -inf for padding
+        """
+        # Expand padding mask to match attention mask shape
+        attn_mask = padding_mask.unsqueeze(1).unsqueeze(2)  # Shape: (b, 1, 1, s)
+        attn_mask = attn_mask.expand(-1, 1, padding_mask.size(1), -1)  # Shape: (b, 1, s, s)
+        # Convert padding positions to -inf
+        attn_mask = attn_mask * torch.finfo(dtype).min
+        return attn_mask
+
+
+    def forward(
+            self,
+            q_x: torch.Tensor,attn_mask: Optional[torch.Tensor] = None,
+            padding_mask: Optional[torch.Tensor] = None,
+    ):
+        k_x = self.ln_1_kv(k_x) if hasattr(self, "ln_1_kv") and k_x is not None else None
+        v_x = self.ln_1_kv(v_x) if hasattr(self, "ln_1_kv") and v_x is not None else None
+        dtype = q_x.dtype
+        assert attn_mask is None
+        if padding_mask is not None:
+            attn_mask = self._get_attn_mask_from_padding_mask(padding_mask, dtype)
+        else:
+            attn_mask = None
+        attn_out, metric = self.attention(q_x=self.ln_1(q_x), k_x=k_x, v_x=v_x, attn_mask=attn_mask)
+        x = q_x + self.ls_1(attn_out)
+        
+        r = self._tome_info["r"]
+        if r > 0:
+            x, padding_mask = self.merge_tokens(metric, r, x, padding_mask=padding_mask)
+        x = x + self.ls_2(self.mlp(self.ln_2(x)))
+        return x, padding_mask
+
+
+
+
 class CustomResidualAttentionBlock(nn.Module):
     def __init__(
             self,
@@ -429,6 +633,153 @@ class CustomTransformer(nn.Module):
         if not self.batch_first:
             x = x.transpose(0, 1)  # NLD -> LND
         return x
+
+
+
+
+class ToMEOpenAITransformer(nn.Module):
+    def __init__(
+            self,
+            width: int,
+            layers: int,
+            heads: int,
+            mlp_ratio: float = 4.0,
+            ls_init_value: float = None,
+            act_layer: Callable = nn.GELU,
+            norm_layer: Callable = LayerNorm,
+            batch_first: bool = True,
+            # tome args
+            merge_mode: str = "batch_level", # merge mode: instance_level or batch_level
+            r_total: int = 0, # total number of tokens to remove
+            r_schedule: str = "constant", # r schedule: constant, linear, reverse_linear
+            max_r_per_instance_ratio: float = None, # 1.0 => rever to fixed r for each instance; > 1.0 => dynamic r
+            update_threshold: bool = False, # whether to post-hoc update threshold after training
+            specified_thresholds: List[float] = None, # specified threshold for each layer
+    ):
+        super().__init__()
+        self.width = width
+        self.layers = layers
+        self.batch_first = batch_first
+        self.grad_checkpointing = False
+        ### ToMe configs ###
+        self.rs = self._get_rs(layers, r_total, r_schedule)
+        print("set total avg remove token nums each layer as: ", self.rs)
+        print("merge mode: ", merge_mode)
+        self._tome_info = {
+            "size": None,
+            "source": None,
+            "trace_source": False,
+            "prop_attn": True,
+            "class_token": True,
+            "distill_token": False,
+            "merge_mode": merge_mode,
+            "max_r_per_instance_ratio": max_r_per_instance_ratio,
+            "update_threshold": update_threshold,
+            "specified_thresholds": specified_thresholds,
+        }
+        self.resblocks = nn.ModuleList([
+            ToMEResidualAttentionBlock(
+                width,
+                heads,
+                mlp_ratio,
+                ls_init_value=ls_init_value,
+                act_layer=act_layer,
+                norm_layer=norm_layer,
+                batch_first=batch_first,
+                ## ToMe args
+                trace_source = False,
+                prop_attn = True,
+                cls_token = True,
+                r = self.rs[i],
+                merge_mode = merge_mode,
+                max_r_per_instance_ratio = max_r_per_instance_ratio,
+                update_threshold = update_threshold,
+                specified_threshold = specified_thresholds[i] if specified_thresholds is not None else None
+            )
+            for i in range(layers)
+        ])
+
+    def get_cast_dtype(self) -> torch.dtype:
+        if hasattr(self.resblocks[0].mlp.c_fc, 'int8_original_dtype'):
+            return self.resblocks[0].mlp.c_fc.int8_original_dtype
+        return self.resblocks[0].mlp.c_fc.weight.dtype
+
+
+    def _get_rs(self, num_layers, r_total, r_schedule="constant"):
+        
+        if r_total == 0:
+            return [0] * num_layers
+        
+        if r_schedule == "constant":
+            if r_total % num_layers == 0:
+                r = r_total // num_layers
+                return [r] * num_layers
+            else:
+                # Distribute as evenly as possible, but account for remainders
+                base_r = r_total // num_layers
+                remainder = r_total % num_layers
+                # Create a distribution list starting with the base value
+                distribution = [base_r] * num_layers
+                # Distribute the remainder across the first few layers
+                for i in range(remainder):
+                    distribution[i] += 1
+                return distribution
+
+        elif r_schedule in ["linear", "reverse_linear"]:
+            # approximate a linear schedule with the last layer has no reduction
+            M = r_total
+            N = num_layers
+            r0 = (2*M) // N
+            step = r0 / N
+            s = []
+            while sum(s) + int(r0 - len(s)*step) < M:
+                s.append(int(r0 - len(s)*step))
+            if sum(s) < M:
+                s.append(M - sum(s))
+            while len(s) < N:
+                s.append(0)
+            assert sum(s) == M
+            assert len(s) == N
+            if r_schedule == "linear":
+                return s
+            else:
+                return s[::-1]
+        else:
+            raise ValueError(f"Invalid r_schedule: {r_schedule}")
+
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None):
+        # for enable getting intermediate features for llava-style model
+        self._tome_info["size"] = None
+        self._tome_info["source"] = None
+        
+        if not self.batch_first:
+            x = x.transpose(0, 1).contiguous()    # NLD -> LND
+        hidden_states = []
+        padding_masks = []
+        sizes = []
+        self.output_stats = {}
+        padding_mask = None
+        for idx, r in enumerate(self.resblocks):
+            r._tome_info["size"] = self._tome_info["size"]
+            if self.grad_checkpointing and not torch.jit.is_scripting():
+                # TODO: handle kwargs https://github.com/pytorch/pytorch/issues/79887#issuecomment-1161758372
+                x, padding_mask = checkpoint(r, x, None, None, attn_mask, padding_mask)
+            else:
+                x, padding_mask = r(x, attn_mask=attn_mask, padding_mask=padding_mask)
+            self._tome_info["size"] = r._tome_info["size"]
+            hidden_states.append(x)
+            padding_masks.append(padding_mask)
+            sizes.append(self._tome_info["size"])
+            if padding_mask is not None:
+                ntoks = (padding_mask<0.5).float().sum(-1)
+            else:
+                ntoks = x.shape[1]
+            self.output_stats[f"block_{idx}_ntoks"] = ntoks.detach()
+        final_size = self._tome_info["size"]
+        if not self.batch_first:
+            x = x.transpose(0, 1)    # LND -> NLD
+        return x, padding_mask, final_size
 
 
 class VisionTransformer(nn.Module):
@@ -625,6 +976,113 @@ class VisionTransformer(nn.Module):
         x = self.ln_pre(x)
         x = self.transformer(x)
 
+        if self.attn_pool is not None:
+            if self.attn_pool_contrastive is not None:
+                # This is untested, WIP pooling that should match paper
+                x = self.ln_post(x)  # TBD LN first or separate one after each pool?
+                tokens = self.attn_pool(x)
+                if self.attn_pool_type == 'parallel':
+                    pooled = self.attn_pool_contrastive(x)
+                else:
+                    assert self.attn_pool_type == 'cascade'
+                    pooled = self.attn_pool_contrastive(tokens)
+            else:
+                # this is the original OpenCLIP CoCa setup, does not match paper
+                x = self.attn_pool(x)
+                x = self.ln_post(x)
+                pooled, tokens = self._global_pool(x)
+        elif self.final_ln_after_pool:
+            pooled, tokens = self._global_pool(x)
+            pooled = self.ln_post(pooled)
+        else:
+            x = self.ln_post(x)
+            pooled, tokens = self._global_pool(x)
+
+        if self.proj is not None:
+            pooled = pooled @ self.proj
+
+        if self.output_tokens:
+            return pooled, tokens
+        
+        return pooled
+
+
+class ToMEOpenAIVisionTransformer(VisionTransformer):
+
+    def __init__(
+            self,
+            image_size: int,
+            patch_size: int,
+            width: int,
+            layers: int,
+            heads: int,
+            mlp_ratio: float,
+            ls_init_value: float = None,
+            attentional_pool: bool = False,
+            attn_pooler_queries: int = 256,
+            attn_pooler_heads: int = 8,
+            output_dim: int = 512,
+            patch_dropout: float = 0.,
+            no_ln_pre: bool = False,
+            pos_embed_type: str = 'learnable',
+            pool_type: str = 'tok',
+            final_ln_after_pool: bool = False,
+            act_layer: Callable = nn.GELU,
+            norm_layer: Callable = LayerNorm,
+            output_tokens: bool = False,
+            # tome args
+            merge_mode: str = "batch_level", # merge mode: instance_level or batch_level
+            r_total: int = 0, # total number of tokens to remove
+            r_schedule: str = "constant", # r schedule: constant, linear, reverse_linear
+            max_r_per_instance_ratio: float = None, # 1.0 => rever to fixed r for each instance; > 1.0 => dynamic r
+            update_threshold: bool = False, # whether to post-hoc update threshold after training
+            specified_thresholds: List[float] = None, # specified threshold for each layer
+            **kwargs
+    ):
+        super().__init__(
+            image_size=image_size,
+            patch_size=patch_size,
+            width=width,
+            layers=layers,
+            heads=heads,
+            mlp_ratio=mlp_ratio,
+            ls_init_value=ls_init_value,
+            attentional_pool=attentional_pool,
+            attn_pooler_queries=attn_pooler_queries,
+            attn_pooler_heads=attn_pooler_heads,
+            output_dim=output_dim,
+            patch_dropout=patch_dropout,
+            no_ln_pre=no_ln_pre,
+            pos_embed_type=pos_embed_type,
+            pool_type=pool_type,
+            final_ln_after_pool=final_ln_after_pool,
+            act_layer=act_layer,
+            norm_layer=norm_layer,
+            output_tokens=output_tokens,
+            **kwargs
+        )
+        del self.transformer
+
+        ###
+        self.transformer = ToMEOpenAITransformer(width, layers, heads, mlp_ratio, ls_init_value=ls_init_value,
+            act_layer=act_layer,
+            norm_layer=norm_layer,merge_mode=merge_mode, r_total=r_total, r_schedule=r_schedule, max_r_per_instance_ratio=max_r_per_instance_ratio, update_threshold=update_threshold, specified_thresholds=specified_thresholds)
+
+    def forward(self, x: torch.Tensor):
+        x = self.conv1(x)  # shape = [*, width, grid, grid]
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+
+        # class embeddings and positional embeddings
+        x = torch.cat([_expand_token(self.class_embedding, x.shape[0]).to(x.dtype), x], dim=1)
+        # shape = [*, grid ** 2 + 1, width]
+        x = x + self.positional_embedding.to(x.dtype)
+
+        x = self.patch_dropout(x)
+        x = self.ln_pre(x)
+        x, padding_mask, final_size = self.transformer(x)
+        
+        assert False, "Need to fix this pooling method for tome"
         if self.attn_pool is not None:
             if self.attn_pool_contrastive is not None:
                 # This is untested, WIP pooling that should match paper
@@ -924,3 +1382,5 @@ class MultimodalTransformer(Transformer):
     @torch.jit.ignore
     def set_grad_checkpointing(self, enable=True):
         self.grad_checkpointing = enable
+
+

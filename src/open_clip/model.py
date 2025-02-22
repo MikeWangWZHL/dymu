@@ -18,10 +18,16 @@ from functools import partial
 from .hf_model import HFTextEncoder
 from .modified_resnet import ModifiedResNet
 from .timm_model import TimmModel
-from .transformer import LayerNormFp32, LayerNorm, QuickGELU, Attention, VisionTransformer, TextTransformer,\
+from .transformer import LayerNormFp32, LayerNorm, QuickGELU, Attention, ToMEOpenAIVisionTransformer, VisionTransformer, TextTransformer,\
     text_global_pool
 from .utils import to_2tuple
 
+
+@dataclass
+class ToMECfg:
+    r_total: int = 0
+    merge_mode: str = "batch"
+    r_schedule: str = "constant"
 
 @dataclass
 class CLIPVisionCfg:
@@ -53,6 +59,10 @@ class CLIPVisionCfg:
     timm_drop: float = 0.  # head dropout
     timm_drop_path: Optional[float] = None  # backbone stochastic depth
 
+    tome_cfg: Optional[ToMECfg] = None
+    def __post_init__(self):
+        if isinstance(self.tome_cfg, dict):
+            self.tome_cfg = ToMECfg(**self.tome_cfg)
 
 @dataclass
 class CLIPTextCfg:
@@ -140,6 +150,37 @@ def _build_vision_tower(
             image_size=vision_cfg.image_size,
             width=vision_cfg.width,
         )
+    elif vision_cfg.tome_cfg is not None:
+        vision_heads = vision_cfg.width // vision_cfg.head_width
+        norm_layer = LayerNormFp32 if cast_dtype in (torch.float16, torch.bfloat16) else LayerNorm
+        if vision_cfg.norm_kwargs:
+            norm_layer = partial(norm_layer, **vision_cfg.norm_kwargs)
+        if vision_cfg.act_kwargs is not None:
+            act_layer = partial(act_layer, **vision_cfg.act_kwargs)
+        
+        visual = ToMEOpenAIVisionTransformer(
+            image_size=vision_cfg.image_size,
+            patch_size=vision_cfg.patch_size,
+            width=vision_cfg.width,
+            layers=vision_cfg.layers,
+            heads=vision_heads,
+            mlp_ratio=vision_cfg.mlp_ratio,
+            ls_init_value=vision_cfg.ls_init_value,
+            patch_dropout=vision_cfg.patch_dropout,
+            attentional_pool=vision_cfg.attentional_pool,
+            attn_pooler_queries=vision_cfg.attn_pooler_queries,
+            attn_pooler_heads=vision_cfg.attn_pooler_heads,
+            pos_embed_type=vision_cfg.pos_embed_type,
+            no_ln_pre=vision_cfg.no_ln_pre,
+            final_ln_after_pool=vision_cfg.final_ln_after_pool,
+            pool_type=vision_cfg.pool_type,
+            output_tokens=vision_cfg.output_tokens,
+            output_dim=embed_dim,
+            act_layer=act_layer,
+            norm_layer=norm_layer,
+            merge_mode=vision_cfg.tome_cfg.merge_mode, r_total=vision_cfg.tome_cfg.r_total, r_schedule=vision_cfg.tome_cfg.r_schedule
+        )
+        
     else:
         vision_heads = vision_cfg.width // vision_cfg.head_width
         norm_layer = LayerNormFp32 if cast_dtype in (torch.float16, torch.bfloat16) else LayerNorm

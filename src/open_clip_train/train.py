@@ -9,8 +9,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.nn.parallel.distributed import DistributedDataParallel
+import torch.distributed as dist
 
 from open_clip.tome import ToMEVisionTransformer
+from open_clip.transformer import ToMEOpenAITransformer
 
 try:
     import wandb
@@ -21,6 +23,13 @@ from open_clip import get_input_dtype, CLIP, CustomTextCLIP
 from open_clip_train.distributed import is_master
 from open_clip_train.zero_shot import zero_shot_eval
 from open_clip_train.precision import get_autocast
+
+
+
+def average_across_devices(value, world_size):
+    tensor = torch.tensor(value, dtype=torch.float32, device="cuda")
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    return tensor.item() / world_size
 
 
 class AverageMeter(object):
@@ -224,11 +233,14 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                     losses_m[key] = AverageMeter()
                 losses_m[key].update(val.item(), batch_size)
             
-            if (hasattr(model, "module") and isinstance(model.module.visual.trunk, ToMEVisionTransformer)) or (not hasattr(model, "module") and isinstance(model.visual.trunk, ToMEVisionTransformer)):
-                if hasattr(model, "module"):
-                    trunk = model.module.visual.trunk
-                else:
+            model_module = model
+            if hasattr(model, "module"):
+                model_module = model.module
+            if (hasattr(model_module.visual, 'trunk') and isinstance(model_module.visual.trunk, ToMEVisionTransformer)) or (hasattr(model_module.visual, 'transformer') and isinstance(model_module.visual.transformer, ToMEOpenAITransformer)):
+                if hasattr(model_module.visual, 'trunk'):
                     trunk = model.visual.trunk.blocks
+                else:
+                    trunk = model.visual.transformer.resblocks
                 outputs_m = trunk.output_stats
                 # for key, value in output_stats.items():
                 #     outputs_m[key].update(value, batch_size)
@@ -382,11 +394,58 @@ def evaluate(model, data, epoch, args, tb_writer=None, tokenizer=None):
             num_batches_per_epoch = dataloader.num_batches // args.accum_freq
             step = num_batches_per_epoch * epoch
         else:
-            step = None
+            step = epoch*1000
         log_data['epoch'] = epoch
         wandb.log(log_data, step=step)
 
     return metrics
+
+
+
+def evaluate_distributed(model, data, epoch, args, tb_writer=None, tokenizer=None):
+    metrics = {}
+    device = torch.device(args.device)
+    model.eval()
+
+    zero_shot_metrics = zero_shot_eval(model, data, epoch, args, tokenizer=tokenizer)
+    total_zero_shot_metrics = {
+        k: average_across_devices(v, args.world_size) for k,v in zero_shot_metrics.items()
+    }
+    zero_shot_metrics = total_zero_shot_metrics
+    metrics.update(zero_shot_metrics)
+    print(metrics)
+
+    
+    autocast = get_autocast(args.precision, device_type=device.type)
+    input_dtype = get_input_dtype(args.precision)
+    if not metrics:
+        return metrics
+
+    logging.info(
+        f"Eval Epoch: {epoch} "
+        + "\t".join([f"{k}: {round(v, 4):.4f}" for k, v in zero_shot_metrics.items()])
+    )
+
+    log_data = {"val/" + name: val for name, val in metrics.items()}
+
+    if args.save_logs:
+        if tb_writer is not None:
+            for name, val in log_data.items():
+                tb_writer.add_scalar(name, val, epoch)
+
+        with open(os.path.join(args.checkpoint_path, "results.jsonl"), "a+") as f:
+            f.write(json.dumps(metrics))
+            f.write("\n")
+
+    if is_master(args) and args.wandb:
+        assert wandb is not None, 'Please install wandb.'
+        step = epoch*1000
+        log_data['epoch'] = epoch
+        wandb.log(log_data, step=step)
+
+    return metrics
+
+
 
 
 def get_clip_metrics(image_features, text_features, logit_scale):
