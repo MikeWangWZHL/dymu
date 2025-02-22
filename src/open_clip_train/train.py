@@ -238,9 +238,9 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                 model_module = model.module
             if (hasattr(model_module.visual, 'trunk') and isinstance(model_module.visual.trunk, ToMEVisionTransformer)) or (hasattr(model_module.visual, 'transformer') and isinstance(model_module.visual.transformer, ToMEOpenAITransformer)):
                 if hasattr(model_module.visual, 'trunk'):
-                    trunk = model_module.visual.trunk.blocks
+                    trunk = model_module.visual.trunk
                 else:
-                    trunk = model_module.visual.transformer.resblocks
+                    trunk = model_module.visual.transformer
                 outputs_m = trunk.output_stats
                 # for key, value in output_stats.items():
                 #     outputs_m[key].update(value, batch_size)
