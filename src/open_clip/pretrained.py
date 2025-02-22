@@ -498,6 +498,9 @@ _PRETRAINED = {
     "ViT-B-16-SigLIP-384-tome-72out": dict(
         webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
     ),
+    "ViT-B-16-SigLIP-384-tome-72out-linear": dict(
+        webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
+    ),
     "ViT-B-16-SigLIP-384-tome-192out": dict(
         webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
     ),
