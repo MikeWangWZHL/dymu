@@ -158,6 +158,11 @@ def _build_vision_tower(
         if vision_cfg.act_kwargs is not None:
             act_layer = partial(act_layer, **vision_cfg.act_kwargs)
         
+        merge_mode = kwargs.pop('merge_mode', vision_cfg.tome_cfg.merge_mode)
+        r_total = kwargs.pop('r_total', vision_cfg.tome_cfg.r_total)
+        r_schedule = kwargs.pop('r_schedule', vision_cfg.tome_cfg.r_schedule)
+        print("creating ToMEOpenAIVisionTransformer using ToMe config:", 
+              f"merge_mode={merge_mode}, r_total={r_total}, r_schedule={r_schedule},", kwargs)
         visual = ToMEOpenAIVisionTransformer(
             image_size=vision_cfg.image_size,
             patch_size=vision_cfg.patch_size,
@@ -178,9 +183,12 @@ def _build_vision_tower(
             output_dim=embed_dim,
             act_layer=act_layer,
             norm_layer=norm_layer,
-            merge_mode=vision_cfg.tome_cfg.merge_mode, r_total=vision_cfg.tome_cfg.r_total, r_schedule=vision_cfg.tome_cfg.r_schedule
+            # tome
+            merge_mode=merge_mode, 
+            r_total=r_total, 
+            r_schedule=r_schedule,
+            **kwargs
         )
-        
     else:
         vision_heads = vision_cfg.width // vision_cfg.head_width
         norm_layer = LayerNormFp32 if cast_dtype in (torch.float16, torch.bfloat16) else LayerNorm

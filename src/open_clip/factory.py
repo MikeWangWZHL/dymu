@@ -347,6 +347,7 @@ def create_model(
 
     model_cfg = dict(model_cfg, **model_kwargs)  # merge cfg dict w/ kwargs (kwargs overrides cfg)
 
+    print("Model cfg:", model_cfg)
     if custom_text:
         if "multimodal_cfg" in model_cfg:
             model = CoCa(**model_cfg, cast_dtype=cast_dtype)

@@ -1,5 +1,6 @@
 {
     "embed_dim": 768,
+    "quick_gelu": true,
     "vision_cfg": {
         "image_size": 336,
         "layers": 24,
@@ -7,7 +8,7 @@
         "patch_size": 14,
         "tome_cfg": {
             "r_total": 504,
-            "merge_mode": "batch",
+            "merge_mode": "batch_level",
             "r_schedule": "constant"
         }
     },

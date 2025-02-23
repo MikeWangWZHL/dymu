@@ -8,7 +8,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
-from open_clip.tome import batch_level_bipartite_soft_matching, batch_level_merge_wavg, bipartite_soft_matching, merge_source, merge_wavg
+from open_clip.tome import batch_level_bipartite_soft_matching, batch_level_merge_wavg, bipartite_soft_matching, merge_source, merge_wavg, CLIPVisionEncoderToMEOutput
 
 from .utils import to_2tuple
 from .pos_embed import get_2d_sincos_pos_embed
@@ -270,7 +270,7 @@ class ResidualAttentionBlock(nn.Module):
 class ToMEMultiheadAttention(nn.MultiheadAttention):
     def forward(
         self,
-       query: Tensor,
+        query: Tensor,
         key: Tensor,
         value: Tensor,
         size:Optional[Tensor]=None,
@@ -291,9 +291,17 @@ class ToMEMultiheadAttention(nn.MultiheadAttention):
                 raise ValueError(
                     f"Attention mask should be of size {(B, 1, N, N)}, but is {attn_mask.size()}"
                 )
+            # Expand the attn_mask to [B, num_heads, N, N]
+            expanded_mask = attn_mask.expand(B, self.num_heads, N, N)
             if full_bias is None:
-                full_bias = 0
-            full_bias = full_bias + attn_mask
+                full_bias = expanded_mask
+            else:
+                full_bias = full_bias + expanded_mask
+
+        # If a bias mask was created, reshape it to merge the batch and head dimensions.
+        if full_bias is not None:
+            full_bias = full_bias.reshape(B * self.num_heads, N, N)        
+
         return super().forward(query=query, key=key, value=value, attn_mask=full_bias, need_weights=need_weights)
 
 
@@ -369,7 +377,7 @@ class ToMEResidualAttentionBlock(nn.Module):
         attn_size = self._tome_info["size"] if self._tome_info["prop_attn"] else None
         attn_mask = attn_mask.to(q_x.dtype) if attn_mask is not None else None
         attn_out = self.attn(
-            q_x, k_x, v_x, need_weights=False, size =attn_size, attn_mask=attn_mask
+            q_x, k_x, v_x, need_weights=False, size=attn_size, attn_mask=attn_mask
         )[0]
         metric = k_x
         return attn_out, metric
@@ -428,6 +436,8 @@ class ToMEResidualAttentionBlock(nn.Module):
             )
             if self.training or self.update_threshold:
                 self.threshold_running_avg(batch_threshold)
+        else:
+            raise ValueError(f"Invalid merge mode: {self._tome_info['merge_mode']}; must be 'instance_level' or 'batch_level'")
             
         return hidden_states, padding_mask
 
@@ -446,7 +456,7 @@ class ToMEResidualAttentionBlock(nn.Module):
 
     def forward(
             self,
-            q_x: torch.Tensor,attn_mask: Optional[torch.Tensor] = None,
+            q_x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None,
             padding_mask: Optional[torch.Tensor] = None,
     ):
         k_x = self.ln_1_kv(k_x) if hasattr(self, "ln_1_kv") and k_x is not None else None
@@ -665,6 +675,7 @@ class ToMEOpenAITransformer(nn.Module):
         self.rs = self._get_rs(layers, r_total, r_schedule)
         print("set total avg remove token nums each layer as: ", self.rs)
         print("merge mode: ", merge_mode)
+        assert merge_mode in ["instance_level", "batch_level"]
         self._tome_info = {
             "size": None,
             "source": None,
@@ -703,7 +714,6 @@ class ToMEOpenAITransformer(nn.Module):
         if hasattr(self.resblocks[0].mlp.c_fc, 'int8_original_dtype'):
             return self.resblocks[0].mlp.c_fc.int8_original_dtype
         return self.resblocks[0].mlp.c_fc.weight.dtype
-
 
     def _get_rs(self, num_layers, r_total, r_schedule="constant"):
         
@@ -752,9 +762,10 @@ class ToMEOpenAITransformer(nn.Module):
         # for enable getting intermediate features for llava-style model
         self._tome_info["size"] = None
         self._tome_info["source"] = None
-        
-        if not self.batch_first:
-            x = x.transpose(0, 1).contiguous()    # NLD -> LND
+        assert self.batch_first, "only support batch_first"
+        # if not self.batch_first:
+        #     x = x.transpose(0, 1).contiguous()    # NLD -> LND
+
         hidden_states = []
         padding_masks = []
         sizes = []
@@ -773,13 +784,15 @@ class ToMEOpenAITransformer(nn.Module):
             sizes.append(self._tome_info["size"])
             if padding_mask is not None:
                 ntoks = (padding_mask<0.5).float().sum(-1)
+                ntoks = ntoks.detach().tolist()
             else:
-                ntoks = x.shape[1]
-            self.output_stats[f"block_{idx}_ntoks"] = ntoks.detach()
+                ntoks = [x.shape[1]]*x.shape[0]
+            self.output_stats[f"block_{idx}_ntoks"] = ntoks
         final_size = self._tome_info["size"]
-        if not self.batch_first:
-            x = x.transpose(0, 1)    # LND -> NLD
-        return x, padding_mask, final_size
+
+        # if not self.batch_first:
+        #     x = x.transpose(0, 1)    # LND -> NLD
+        return x, padding_mask, final_size, {"hidden_states": hidden_states, "padding_masks": padding_masks, "sizes": sizes}
 
 
 class VisionTransformer(nn.Module):
@@ -1007,6 +1020,68 @@ class VisionTransformer(nn.Module):
         return pooled
 
 
+class AttentionalPoolerWMasking(nn.Module):
+    def __init__(
+            self,
+            d_model: int,
+            context_dim: int,
+            n_head: int = 8,
+            n_queries: int = 256,
+            norm_layer: Callable = LayerNorm,
+    ):
+        super().__init__()
+        self.n_head = n_head
+        self.query = nn.Parameter(torch.randn(n_queries, d_model))
+        self.attn = nn.MultiheadAttention(d_model, n_head, kdim=context_dim, vdim=context_dim, batch_first=True)
+        self.ln_q = norm_layer(d_model)
+        self.ln_k = norm_layer(context_dim)
+
+    def forward(self, 
+                x: torch.Tensor,  
+                attention_mask: Optional[torch.Tensor] = None,
+                size: Optional[int] = None
+                ):
+        B = x.shape[0]
+        assert len(x.shape) == 3, f"Input shape should be [B, L, D], got {x.shape}"
+        x = self.ln_k(x)
+        q = self.ln_q(self.query)
+
+        full_bias = None
+        # If size is provided, compute a bias from it.
+        if size is not None:
+            # Assume size has shape [B, L, 1]
+            # Log transform and squeeze the last dim to get [B, L]
+            size_bias_log = size.log()[:, :, 0]
+            # Expand to [B, n_queries, L]
+            size_bias_log = size_bias_log.unsqueeze(1).expand(B, q.shape[0], x.shape[1])
+            full_bias = size_bias_log
+        
+        # Incorporate the attention_mask if provided.
+        if attention_mask is not None:
+            # Expect attention_mask to be [B, 1, L]
+            assert attention_mask.size() == (B, 1, x.shape[1]), (
+                f"Attention mask shape {attention_mask.size()} not compatible with expected shape {(B, 1, x.shape[1])}"
+            )
+            # Expand to [B, n_queries, L]
+            attention_mask = attention_mask.expand(B, q.shape[0], x.shape[1])
+            if full_bias is None:
+                full_bias = attention_mask
+            else:
+                full_bias = full_bias + attention_mask
+        
+        # If we have a mask (or bias), reshape it for multi-head attention.
+        if full_bias is not None:
+            # full_bias is currently [B, n_queries, L]
+            full_bias = full_bias.unsqueeze(1)  # -> [B, 1, n_queries, L]
+            full_bias = full_bias.expand(B, self.n_head, q.shape[0], x.shape[1])  # -> [B, n_head, n_queries, L]
+            # Reshape to merge the batch and head dimensions: [B * n_head, n_queries, L]
+            full_bias = full_bias.reshape(B * self.n_head, q.shape[0], x.shape[1])
+
+        out = self.attn(q.unsqueeze(0).expand(B, -1, -1), x, x, attn_mask=full_bias, need_weights=False)[0]
+        return out
+
+
+
 class ToMEOpenAIVisionTransformer(VisionTransformer):
 
     def __init__(
@@ -1068,6 +1143,77 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             act_layer=act_layer,
             norm_layer=norm_layer,merge_mode=merge_mode, r_total=r_total, r_schedule=r_schedule, max_r_per_instance_ratio=max_r_per_instance_ratio, update_threshold=update_threshold, specified_thresholds=specified_thresholds)
 
+        ###
+        if attentional_pool:
+            if isinstance(attentional_pool, str):
+                self.attn_pool_type = attentional_pool
+                self.pool_type = 'none'
+                if attentional_pool in ('parallel', 'cascade'):
+                    self.attn_pool = AttentionalPoolerWMasking(
+                        output_dim,
+                        width,
+                        n_head=attn_pooler_heads,
+                        n_queries=attn_pooler_queries,
+                    )
+                    self.attn_pool_contrastive = AttentionalPoolerWMasking(
+                        output_dim,
+                        width,
+                        n_head=attn_pooler_heads,
+                        n_queries=1,
+                    )
+                else:
+                    assert False
+            else:
+                self.attn_pool_type = ''
+                self.pool_type = pool_type
+                self.attn_pool = AttentionalPoolerWMasking(
+                    output_dim,
+                    width,
+                    n_head=attn_pooler_heads,
+                    n_queries=attn_pooler_queries,
+                )
+                self.attn_pool_contrastive = None
+            pool_dim = output_dim
+        else:
+            self.attn_pool = None
+            pool_dim = width
+            self.pool_type = pool_type
+        
+        print("attn_pool:", self.attn_pool)
+        print("pool_type:", self.pool_type)
+
+
+    def _global_pool_w_masking(
+        self,
+        x: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None  # (B, S) with 0 for valid, 1 for padding
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Applies global pooling while considering padding masks.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, S, D).
+            self.pool_type (str): Pooling type - 'avg' for average pooling, 'tok' for token-based pooling.
+            padding_mask (Optional[torch.Tensor]): Padding mask of shape (B, S), where 0 is valid and 1 is padding.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: Pooled tensor and token tensor.
+        """
+        if self.pool_type == 'avg':
+            tokens = x[:, 1:]  # Exclude CLS token
+            if padding_mask is not None:
+                mask = padding_mask[:, 1:].unsqueeze(-1)  # (B, S-1, 1)
+                valid_count = (mask == 0).sum(dim=1, keepdim=True).clamp(min=1)  # Avoid division by zero
+                pooled = (tokens * (mask == 0)).sum(dim=1) / valid_count.squeeze(1)
+            else:
+                pooled = tokens.mean(dim=1)
+        elif self.pool_type == 'tok':
+            pooled, tokens = x[:, 0], x[:, 1:]
+        else:
+            pooled = tokens = x
+
+        return pooled, tokens
+
     def forward(self, x: torch.Tensor):
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
@@ -1080,30 +1226,40 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
 
         x = self.patch_dropout(x)
         x = self.ln_pre(x)
-        x, padding_mask, final_size = self.transformer(x)
+        x, padding_mask, final_size, additional_info = self.transformer(x)
+        self.output_stats = self.transformer.output_stats
         
-        assert False, "Need to fix this pooling method for tome"
+        # get 3D attn mask
+        if padding_mask is not None:
+            # Expand padding mask to match attention mask shape
+            attn_mask = padding_mask.unsqueeze(1)  # Shape: (b, 1, s)
+            # Convert padding positions to -inf
+            attn_mask = attn_mask * torch.finfo(x.dtype).min
+        else:
+            attn_mask = None
+
+        # assert False, "Need to fix this pooling method for tome"
         if self.attn_pool is not None:
             if self.attn_pool_contrastive is not None:
                 # This is untested, WIP pooling that should match paper
                 x = self.ln_post(x)  # TBD LN first or separate one after each pool?
-                tokens = self.attn_pool(x)
+                tokens = self.attn_pool(x, attention_mask=attn_mask, size=final_size)
                 if self.attn_pool_type == 'parallel':
-                    pooled = self.attn_pool_contrastive(x)
+                    pooled = self.attn_pool_contrastive(x, attention_mask=attn_mask, size=final_size)
                 else:
                     assert self.attn_pool_type == 'cascade'
-                    pooled = self.attn_pool_contrastive(tokens)
+                    pooled = self.attn_pool_contrastive(tokens, attention_mask=attn_mask, size=final_size)
             else:
                 # this is the original OpenCLIP CoCa setup, does not match paper
-                x = self.attn_pool(x)
+                x = self.attn_pool(x, attention_mask=attn_mask, size=final_size)
                 x = self.ln_post(x)
-                pooled, tokens = self._global_pool(x)
+                pooled, tokens = self._global_pool_w_masking(x, padding_mask)
         elif self.final_ln_after_pool:
-            pooled, tokens = self._global_pool(x)
+            pooled, tokens = self._global_pool_w_masking(x, padding_mask)
             pooled = self.ln_post(pooled)
         else:
             x = self.ln_post(x)
-            pooled, tokens = self._global_pool(x)
+            pooled, tokens = self._global_pool_w_masking(x, padding_mask)
 
         if self.proj is not None:
             pooled = pooled @ self.proj
@@ -1113,6 +1269,67 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
         
         return pooled
 
+    def forward_features_all_layers(self, x: torch.Tensor):
+        x = self.conv1(x)  # shape = [*, width, grid, grid]
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+
+        # class embeddings and positional embeddings
+        x = torch.cat([_expand_token(self.class_embedding, x.shape[0]).to(x.dtype), x], dim=1)
+        # shape = [*, grid ** 2 + 1, width]
+        x = x + self.positional_embedding.to(x.dtype)
+
+        x = self.patch_dropout(x)
+        x = self.ln_pre(x)
+        x, padding_mask, final_size, additional_info = self.transformer(x)
+        self.output_stats = self.transformer.output_stats
+        
+        # get 3D attn mask
+        if padding_mask is not None:
+            # Expand padding mask to match attention mask shape
+            attn_mask = padding_mask.unsqueeze(1)  # Shape: (b, 1, s)
+            # Convert padding positions to -inf
+            attn_mask = attn_mask * torch.finfo(x.dtype).min
+        else:
+            attn_mask = None
+
+        # assert False, "Need to fix this pooling method for tome"
+        if self.attn_pool is not None:
+            if self.attn_pool_contrastive is not None:
+                # This is untested, WIP pooling that should match paper
+                x = self.ln_post(x)  # TBD LN first or separate one after each pool?
+                tokens = self.attn_pool(x, attention_mask=attn_mask, size=final_size)
+                if self.attn_pool_type == 'parallel':
+                    pooled = self.attn_pool_contrastive(x, attention_mask=attn_mask, size=final_size)
+                else:
+                    assert self.attn_pool_type == 'cascade'
+                    pooled = self.attn_pool_contrastive(tokens, attention_mask=attn_mask, size=final_size)
+            else:
+                # this is the original OpenCLIP CoCa setup, does not match paper
+                x = self.attn_pool(x, attention_mask=attn_mask, size=final_size)
+                x = self.ln_post(x)
+                pooled, tokens = self._global_pool_w_masking(x, padding_mask)
+        elif self.final_ln_after_pool:
+            pooled, tokens = self._global_pool_w_masking(x, padding_mask)
+            pooled = self.ln_post(pooled)
+        else:
+            x = self.ln_post(x)
+            pooled, tokens = self._global_pool_w_masking(x, padding_mask)
+
+        if self.proj is not None:
+            pooled = pooled @ self.proj
+
+        if self.output_tokens:
+            return pooled, tokens
+        
+        return CLIPVisionEncoderToMEOutput(
+            last_hidden_state=x,
+            pooler_output=pooled,
+            hidden_states=tuple(additional_info['hidden_states']),
+            padding_masks=tuple(additional_info['padding_masks']),
+            sizes=tuple(additional_info['sizes'])
+        )
+        
 
 def text_global_pool(x, text: Optional[torch.Tensor] = None, pool_type: str = 'argmax'):
     if pool_type == 'first':
