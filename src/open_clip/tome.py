@@ -860,7 +860,7 @@ class ToMEVisionTransformer(VisionTransformer):
             merge_mode: str = "batch_level", # merge mode: instance_level or batch_level
             r_total: int = 0, # total number of tokens to remove
             r_schedule: str = "constant", # r schedule: constant, linear, reverse_linear
-            max_r_per_instance_ratio: float = None, # 1.0 => rever to fixed r for each instance; > 1.0 => dynamic r
+            max_r_per_instance_ratio: float = None, # 1.0 => refer to fixed r for each instance; > 1.0 => dynamic r
             update_threshold: bool = False, # whether to post-hoc update threshold after training
             specified_thresholds: List[float] = None, # specified threshold for each layer
             **kwargs

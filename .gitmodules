@@ -4,3 +4,6 @@
 [submodule "VLMEvalKit"]
 	path = VLMEvalKit
 	url = https://github.com/MikeWangWZHL/VLMEvalKit.git
+[submodule "LLaMA-Factory"]
+	path = LLaMA-Factory
+	url = https://github.com/MikeWangWZHL/LLaMA-Factory-tome.git

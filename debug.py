@@ -12,16 +12,18 @@ import os
 # model_name = "ViT-B-16-SigLIP-384-tome-no-merge"
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
 
-model_name = "ViT-B-16-SigLIP-384-tome-192out"
+# model_name = "ViT-B-16-SigLIP-384-tome-192out"
+model_name = "ViT-B-16-SigLIP-384-tome-72out"
 # timm_kwargs = {"r_total": 0}
 timm_kwargs = {
-    'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_models_share/datacomp_tome_1e-6_model_ViT-B-16-SigLIP-384-tome-192out_evalmode/vision_checkpoint/epoch_9.pt",
+    'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_models_share/datacomp_tome_1e-6_model_ViT-B-16-SigLIP-384-tome-72out_evalmode/vision_checkpoint/epoch_20.pt",
     # 'pretrained': "webli",
     'pretrained_origin_tag': "webli",
-    # "r_total":384, 
-    "r_total":0,
+    'merge_mode': "instance_level",
+    "r_total":432,
+    # "r_total":0,
     # "specified_thresholds":[0.98046875, 0.90234375, 0.875, 0.8828125, 0.875, 0.8828125, 0.890625, 0.890625, 0.8828125, 0.890625, 0.875, 0.875]
-    "specified_thresholds":[0.9] * 12
+    # "specified_thresholds":[0.9] * 12
 }
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli', **timm_kwargs)
 model, _, preprocess = open_clip.create_model_and_transforms(model_name, **timm_kwargs)
