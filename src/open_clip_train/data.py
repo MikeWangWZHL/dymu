@@ -16,6 +16,8 @@ import torchvision.datasets as datasets
 import webdataset as wds
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler, IterableDataset, get_worker_info
+import torch.distributed as dist
+
 from torch.utils.data.distributed import DistributedSampler
 from webdataset.filters import _shuffle
 from webdataset.tariterators import base_plus_ext, url_opener, tar_file_expander, valid_sample
@@ -159,6 +161,25 @@ def get_imagenet(args, preprocess_fns, split):
     )
 
     return DataInfo(dataloader=dataloader, sampler=sampler)
+
+
+
+def get_imagenet_val(args, preprocess_val):
+    data_path = args.imagenet_val
+    preprocess_fn = preprocess_val
+    dataset = datasets.ImageFolder(data_path, transform=preprocess_fn)
+
+    sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=dist.get_rank(), shuffle=False)
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        num_workers=args.workers,
+        sampler=sampler,
+        pin_memory=True,
+    )
+    return {"imagenet-val": DataInfo(dataloader=dataloader, sampler=sampler)}
+
 
 
 def count_samples(dataloader):
