@@ -429,6 +429,7 @@ _PRETRAINED = {
     "ViT-L-14": _VITL14,
     "ViT-L-14-336": _VITL14_336,
     "ViT-L-14-336-tome-72out": _VITL14_336,
+    "ViT-L-14-336-tome-72out-linear": _VITL14_336,
     "ViT-H-14": _VITH14,
     "ViT-H-14-378": _VITH14_378,
     "ViT-g-14": _VITg14,
@@ -496,6 +497,9 @@ _PRETRAINED = {
         webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
     ),
     "ViT-B-16-SigLIP-384-tome-72out": dict(
+        webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
+    ),
+    "ViT-B-16-SigLIP-384-tome-72out-linear": dict(
         webli=_slpcfg(hf_hub='timm/ViT-B-16-SigLIP-384/'),
     ),
     "ViT-B-16-SigLIP-384-tome-192out": dict(

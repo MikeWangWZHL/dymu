@@ -1114,6 +1114,7 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             specified_thresholds: List[float] = None, # specified threshold for each layer
             **kwargs
     ):
+        del kwargs["pretrained_origin_tag"]
         super().__init__(
             image_size=image_size,
             patch_size=patch_size,
