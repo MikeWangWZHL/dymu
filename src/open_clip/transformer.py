@@ -1081,7 +1081,7 @@ class AttentionalPoolerWMasking(nn.Module):
         return out
 
 
-
+import copy
 class ToMEOpenAIVisionTransformer(VisionTransformer):
 
     def __init__(
@@ -1114,7 +1114,10 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             specified_thresholds: List[float] = None, # specified threshold for each layer
             **kwargs
     ):
-        del kwargs["pretrained_origin_tag"]
+        new_kwargs = copy.deepcopy(kwargs)
+        if 'pretrained_origin_tag' in new_kwargs:
+            del new_kwargs["pretrained_origin_tag"]
+
         super().__init__(
             image_size=image_size,
             patch_size=patch_size,
@@ -1135,7 +1138,7 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             act_layer=act_layer,
             norm_layer=norm_layer,
             output_tokens=output_tokens,
-            **kwargs
+            **new_kwargs
         )
         del self.transformer
 
@@ -1144,6 +1147,12 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             act_layer=act_layer,
             norm_layer=norm_layer,merge_mode=merge_mode, r_total=r_total, r_schedule=r_schedule, max_r_per_instance_ratio=max_r_per_instance_ratio, update_threshold=update_threshold, specified_thresholds=specified_thresholds)
 
+        self.hidden_size = width
+        self.embed_dim = width
+        self.has_class_token = True
+        self.img_size = image_size
+        self.patch_size = patch_size
+        self.num_patches = (image_size // patch_size) ** 2
         ###
         if attentional_pool:
             if isinstance(attentional_pool, str):
