@@ -152,3 +152,5 @@ core.*
 # Allow
 !src/evaluation/misc/results_dbs/*
 datacomp
+
+threshold_checkpoints

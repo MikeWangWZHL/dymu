@@ -4,6 +4,7 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union
 from functools import partial
 
 import torch
+import torch.distributed as dist
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
@@ -362,7 +363,8 @@ class ToMEResidualAttentionBlock(nn.Module):
         self.update_threshold = update_threshold
         # if r>0:
         self.register_buffer('threshold', torch.tensor(1.0)) # default to be no merging
-        self.momentum = 0.1
+        # self.threshold = torch.tensor(1.0)
+        self.threshold_count = 1.0
         self.specified_threshold = specified_threshold
 
     def attention(
@@ -390,8 +392,13 @@ class ToMEResidualAttentionBlock(nn.Module):
                 else:
                     if new_value.device != self.threshold.device:
                         new_value = new_value.to(self.threshold.device)
-                    self.threshold = (1-self.momentum) * self.threshold + self.momentum * new_value
-        
+                    # self.threshold = (1-self.momentum) * self.threshold + self.momentum * new_value
+                    self.threshold = (self.threshold*self.threshold_count + new_value)/(self.threshold_count+1)
+                    self.threshold_count+=1
+                    # print(f'New threshold: {self.threshold}')
+                    if dist.is_initialized() and dist.get_world_size() > 1:
+                        dist.all_reduce(self.threshold, op=dist.ReduceOp.AVG)
+                            
     def merge_tokens(self, metric, r, hidden_states, padding_mask=None):
         if self._tome_info["merge_mode"] == "instance_level":
             merge, _ = bipartite_soft_matching(
