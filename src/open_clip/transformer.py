@@ -267,7 +267,7 @@ class ResidualAttentionBlock(nn.Module):
         x = x + self.ls_2(self.mlp(self.ln_2(x)))
         return x
 
-
+from torch.nn.functional import _in_projection_packed
 class ToMEMultiheadAttention(nn.MultiheadAttention):
     def forward(
         self,
@@ -301,10 +301,14 @@ class ToMEMultiheadAttention(nn.MultiheadAttention):
 
         # If a bias mask was created, reshape it to merge the batch and head dimensions.
         if full_bias is not None:
-            full_bias = full_bias.reshape(B * self.num_heads, N, N)        
+            full_bias = full_bias.reshape(B * self.num_heads, N, N)      
 
-        return super().forward(query=query, key=key, value=value, attn_mask=full_bias, need_weights=need_weights)
+        # compute the metric
+        q, k, v = _in_projection_packed(query, key, value, self.in_proj_weight, self.in_proj_bias)
+        k = k.view(B, self.num_heads, N, -1)
+        metric = k.mean(1)
 
+        return super().forward(query=query, key=key, value=value, attn_mask=full_bias, need_weights=need_weights)[0], metric
 
 
 class ToMEResidualAttentionBlock(nn.Module):
@@ -378,10 +382,9 @@ class ToMEResidualAttentionBlock(nn.Module):
         v_x = v_x if v_x is not None else q_x
         attn_size = self._tome_info["size"] if self._tome_info["prop_attn"] else None
         attn_mask = attn_mask.to(q_x.dtype) if attn_mask is not None else None
-        attn_out = self.attn(
+        attn_out, metric = self.attn(
             q_x, k_x, v_x, need_weights=False, size=attn_size, attn_mask=attn_mask
-        )[0]
-        metric = k_x
+        )
         return attn_out, metric
 
     def threshold_running_avg(self, new_value):
@@ -1087,7 +1090,9 @@ class AttentionalPoolerWMasking(nn.Module):
         out = self.attn(q.unsqueeze(0).expand(B, -1, -1), x, x, attn_mask=full_bias, need_weights=False)[0]
         return out
 
-
+TOME_ARG_NAMES = [
+    "merge_mode", "r_total", "r_schedule", "max_r_per_instance_ratio", "update_threshold", "specified_thresholds"
+]
 import copy
 class ToMEOpenAIVisionTransformer(VisionTransformer):
 
@@ -1121,9 +1126,9 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             specified_thresholds: List[float] = None, # specified threshold for each layer
             **kwargs
     ):
-        new_kwargs = copy.deepcopy(kwargs)
-        if 'pretrained_origin_tag' in new_kwargs:
-            del new_kwargs["pretrained_origin_tag"]
+        super_kwargs = copy.deepcopy(kwargs)
+        if 'pretrained_origin_tag' in super_kwargs:
+            del super_kwargs["pretrained_origin_tag"]
 
         super().__init__(
             image_size=image_size,
@@ -1145,7 +1150,7 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             act_layer=act_layer,
             norm_layer=norm_layer,
             output_tokens=output_tokens,
-            **new_kwargs
+            **super_kwargs
         )
         del self.transformer
 
