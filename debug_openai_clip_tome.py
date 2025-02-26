@@ -10,12 +10,18 @@ import os
 # model_name = "ViT-L-14-336-quickgelu"
 # model_name = "ViT-L-14-336-tome-72out" # with quickgelu
 # tome_kwargs = {"specified_thresholds": [0.8]*24}
-model_name = "ViT-L-14-336-tome-72out" # with quickgelu
+# model_name = "ViT-L-14-336-tome-72out" # with quickgelu
 # tome_kwargs = {"r_total": 0}
 tome_kwargs = {"r_total": 504}
 
-# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_models_share/nofinetune_models/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', **tome_kwargs)
-model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='openai', **tome_kwargs)
+# model_name = "ViT-L-14-336-tome-72out" # with quickgelu
+# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', **tome_kwargs)
+
+model_name = "ViT-L-14-336-tome-72out-linear" # with quickgelu
+model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out-linear.pth', **tome_kwargs)
+
+# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='openai', **tome_kwargs)
+
 # print()
 model.eval()
 # model.train()
@@ -69,7 +75,7 @@ outputs = tome_vision_encoder.forward_features_all_layers(image)
 hidden_states = outputs.hidden_states
 padding_masks = outputs.padding_masks # b, n
 if padding_masks[-1] is not None:
-    print((padding_masks[-1]==0).sum())
+    print("remaining tokens: ", (padding_masks[-1]==0).sum())
 
 import pdb; pdb.set_trace()
 

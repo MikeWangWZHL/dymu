@@ -218,7 +218,7 @@ def batch_level_bipartite_soft_matching(
     r = min(r, (t - protected) // 2)
 
     if r <= 0:
-        return do_nothing, do_nothing
+        return do_nothing, do_nothing, None
 
     with torch.no_grad():
         
@@ -627,12 +627,12 @@ class ToMEBlock(nn.Module):
                 max_r_per_instance = max_r_per_instance,
                 specified_threshold = specified_threshold
             )
-            
-            hidden_states, self._tome_info["size"], padding_mask = batch_level_merge_wavg(
-                merge, hidden_states, self._tome_info["size"]
-            )
-            if self.training or self.update_threshold:
-                self.threshold_running_avg(batch_threshold)
+            if merge != do_nothing:
+                hidden_states, self._tome_info["size"], padding_mask = batch_level_merge_wavg(
+                    merge, hidden_states, self._tome_info["size"]
+                )
+                if self.training or self.update_threshold:
+                    self.threshold_running_avg(batch_threshold)
             
         return hidden_states, padding_mask
 

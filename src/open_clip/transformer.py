@@ -9,7 +9,14 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
-from open_clip.tome import batch_level_bipartite_soft_matching, batch_level_merge_wavg, bipartite_soft_matching, merge_source, merge_wavg, CLIPVisionEncoderToMEOutput
+from open_clip.tome import (
+    batch_level_bipartite_soft_matching, 
+    batch_level_merge_wavg, 
+    bipartite_soft_matching, 
+    merge_source, merge_wavg, 
+    CLIPVisionEncoderToMEOutput,
+    do_nothing
+)
 
 from .utils import to_2tuple
 from .pos_embed import get_2d_sincos_pos_embed
@@ -440,12 +447,12 @@ class ToMEResidualAttentionBlock(nn.Module):
                 max_r_per_instance = max_r_per_instance,
                 specified_threshold = specified_threshold
             )
-            
-            hidden_states, self._tome_info["size"], padding_mask = batch_level_merge_wavg(
-                merge, hidden_states, self._tome_info["size"]
-            )
-            if self.training or self.update_threshold:
-                self.threshold_running_avg(batch_threshold)
+            if merge != do_nothing:
+                hidden_states, self._tome_info["size"], padding_mask = batch_level_merge_wavg(
+                    merge, hidden_states, self._tome_info["size"]
+                )
+                if self.training or self.update_threshold:
+                    self.threshold_running_avg(batch_threshold)
         else:
             raise ValueError(f"Invalid merge mode: {self._tome_info['merge_mode']}; must be 'instance_level' or 'batch_level'")
             
