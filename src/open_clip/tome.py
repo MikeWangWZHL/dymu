@@ -340,28 +340,6 @@ def batch_level_bipartite_soft_matching(
         src_b = src_idx.squeeze(-1) // t1
         src_s = src_idx.squeeze(-1) % t1
 
-        # print("unm_idx", unm_idx)
-        # print("src_idx", src_idx)
-        # print("unm_b", unm_b)
-        # print("unm_s", unm_s)
-        # print("src_b", src_b)
-        # print("src_s", src_s)
-        # print("dst_idx", dst_idx)
-
-        # fill in unmerged src tokens
-        # src_new[unm_b, unm_s, :] = src[unm_b, unm_s, :]
-
-        # # fill in merged tokens to dst locations
-        # src_tokens = src[src_b, src_s, :]  # Shape: (b * r, c)
-        # dst_tokens = dst[src_b, dst_idx, :]  # Shape: (b * r, c)
-        # if mode == "mean":
-        #     merged_tokens = (src_tokens + dst_tokens) / 2
-        # elif mode == "sum":
-        #     merged_tokens = src_tokens + dst_tokens
-        # else:
-        #     raise ValueError(f"Unsupported merge mode: {mode}")
-        # dst_new[src_b, dst_idx, :] = merged_tokens
-
         src_tokens = src[src_b, src_s, :]  # Shape: (b * r, c)
         dst_b = src_b
         dst_seq_len = dst.size(1)

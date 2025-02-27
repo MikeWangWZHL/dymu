@@ -312,7 +312,8 @@ class ToMEMultiheadAttention(nn.MultiheadAttention):
 
         # compute the metric
         q, k, v = _in_projection_packed(query, key, value, self.in_proj_weight, self.in_proj_bias)
-        k = k.view(B, self.num_heads, N, -1)
+        assert k.shape[0] == B, k.shape[1] == N
+        k = k.view(B, N, self.num_heads, -1).permute(0, 2, 1, 3) # (B, h, N, d_h)
         metric = k.mean(1)
 
         return super().forward(query=query, key=key, value=value, attn_mask=full_bias, need_weights=need_weights)[0], metric

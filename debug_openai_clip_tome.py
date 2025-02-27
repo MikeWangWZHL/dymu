@@ -18,9 +18,9 @@ tome_kwargs = {"r_total": 504}
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', **tome_kwargs)
 
 model_name = "ViT-L-14-336-tome-72out-linear" # with quickgelu
-model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out-linear.pth', **tome_kwargs)
+# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out-linear.pth', **tome_kwargs)
 
-# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='openai', **tome_kwargs)
+model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='openai', **tome_kwargs)
 
 # print()
 model.eval()
@@ -62,9 +62,9 @@ image = [preprocess(Image.open(p)) for p in img_paths] # (2, 3, 336, 336)
 image = torch.stack(image, dim=0)
 
 tome_vision_encoder = model.visual.trunk if hasattr(model.visual, "trunk") else model.visual
-tome_vision_encoder.to("cuda:6")
+tome_vision_encoder.to("cuda:1")
 tome_vision_encoder.to(dtype=torch.float16)
-image = image.to("cuda:6")
+image = image.to("cuda:1")
 image = image.to(dtype=torch.float16)
 
 # for name, param in tome_vision_encoder.named_parameters():
