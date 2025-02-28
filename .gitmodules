@@ -7,3 +7,6 @@
 [submodule "LLaMA-Factory"]
 	path = LLaMA-Factory
 	url = https://github.com/MikeWangWZHL/LLaMA-Factory-tome.git
+[submodule "LLaVA-NeXT"]
+	path = LLaVA-NeXT
+	url = https://github.com/MikeWangWZHL/LLaVA-Next-tome.git

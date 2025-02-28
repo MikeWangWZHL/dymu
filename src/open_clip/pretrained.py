@@ -532,7 +532,9 @@ _PRETRAINED = {
     "ViT-SO400M-14-SigLIP-384": dict(
         webli=_slpcfg(hf_hub='timm/ViT-SO400M-14-SigLIP-384/'),
     ),
-
+    "ViT-SO400M-14-SigLIP-384-tome-192out": dict(
+        webli=_slpcfg(hf_hub='timm/ViT-SO400M-14-SigLIP-384/'),
+    ),
     "ViT-L-14-CLIPA": dict(
         datacomp1b=_apcfg(hf_hub='UCSC-VLAA/ViT-L-14-CLIPA-datacomp1B/'),
     ),

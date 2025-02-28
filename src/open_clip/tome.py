@@ -1368,3 +1368,23 @@ def vit_base_patch16_siglip_384_tome_72out_linear(pretrained: bool = False, **kw
         pretrained=pretrained, 
         block_fn=ToMEBlock, **dict(model_args, **kwargs))
     return model
+
+
+# for llava-one-vision
+@register_model
+def vit_so400m_patch14_siglip_384_tome_192out(pretrained: bool = False, **kwargs) -> VisionTransformer:
+    model_args = dict(
+        patch_size=14, embed_dim=1152, depth=27, num_heads=16, mlp_ratio=3.7362,
+        class_token=False, global_pool='map',
+        merge_mode="batch_level", r_total=537, r_schedule="constant"
+    )
+    # original 729 -> 192
+    for key in ("r_total", "r_schedule", "merge_mode"):
+        if key in kwargs:
+            model_args[key] = kwargs.pop(key)
+
+    model = _create_tome_vision_transformer(
+        'vit_so400m_patch14_siglip_384', 
+        pretrained=pretrained, 
+        block_fn=ToMEBlock, **dict(model_args, **kwargs))
+    return model

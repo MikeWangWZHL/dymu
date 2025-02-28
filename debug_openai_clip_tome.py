@@ -18,9 +18,9 @@ tome_kwargs = {"r_total": 504}
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', **tome_kwargs)
 
 model_name = "ViT-L-14-336-tome-72out-linear" # with quickgelu
-# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out-linear.pth', **tome_kwargs)
+model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out-linear.pth', **tome_kwargs)
 
-model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='openai', **tome_kwargs)
+# model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='openai', **tome_kwargs)
 
 # print()
 model.eval()
