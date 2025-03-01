@@ -410,7 +410,7 @@ class ToMEResidualAttentionBlock(nn.Module):
                     if dist.is_initialized() and dist.get_world_size() > 1:
                         dist.all_reduce(self.threshold, op=dist.ReduceOp.AVG)
                             
-    def merge_tokens(self, metric, r, hidden_states, padding_mask=None):
+    def merge_tokens(self, metric, r, hidden_states, padding_mask=None, pos_tracking=None):
         if self._tome_info["merge_mode"] == "instance_level":
             merge, _ = bipartite_soft_matching(
                 metric,
@@ -422,8 +422,8 @@ class ToMEResidualAttentionBlock(nn.Module):
                 self._tome_info["source"] = merge_source(
                     merge, hidden_states, self._tome_info["source"]
                 )
-            hidden_states, self._tome_info["size"] = merge_wavg(
-                merge, hidden_states, self._tome_info["size"]
+            hidden_states, self._tome_info["size"], pos_tracking = merge_wavg(
+                merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
             )
         elif self._tome_info["merge_mode"] == "batch_level":
 
@@ -449,15 +449,13 @@ class ToMEResidualAttentionBlock(nn.Module):
                 specified_threshold = specified_threshold
             )
             if merge != do_nothing:
-                hidden_states, self._tome_info["size"], padding_mask = batch_level_merge_wavg(
-                    merge, hidden_states, self._tome_info["size"]
+                hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
+                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
                 )
                 if self.training or self.update_threshold:
                     self.threshold_running_avg(batch_threshold)
-        else:
-            raise ValueError(f"Invalid merge mode: {self._tome_info['merge_mode']}; must be 'instance_level' or 'batch_level'")
             
-        return hidden_states, padding_mask
+        return hidden_states, padding_mask, pos_tracking
 
     def _get_attn_mask_from_padding_mask(self, padding_mask, dtype):
         """
@@ -476,6 +474,7 @@ class ToMEResidualAttentionBlock(nn.Module):
             self,
             q_x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None,
             padding_mask: Optional[torch.Tensor] = None,
+            pos_tracking: Optional[torch.Tensor] = None,
     ):
         k_x = self.ln_1_kv(k_x) if hasattr(self, "ln_1_kv") and k_x is not None else None
         v_x = self.ln_1_kv(v_x) if hasattr(self, "ln_1_kv") and v_x is not None else None
@@ -490,9 +489,9 @@ class ToMEResidualAttentionBlock(nn.Module):
         
         r = self._tome_info["r"]
         if r > 0:
-            x, padding_mask = self.merge_tokens(metric, r, x, padding_mask=padding_mask)
+            x, padding_mask, pos_tracking = self.merge_tokens(metric, r, x, padding_mask=padding_mask, pos_tracking=pos_tracking)
         x = x + self.ls_2(self.mlp(self.ln_2(x)))
-        return x, padding_mask
+        return x, padding_mask, pos_tracking
 
 
 
@@ -787,18 +786,22 @@ class ToMEOpenAITransformer(nn.Module):
         hidden_states = []
         padding_masks = []
         sizes = []
+        pos_trackings = []
         self.output_stats = {}
         padding_mask = None
+        B, N = x.shape[:2]
+        pos_tracking = torch.eye(N, dtype=torch.int32, device=x.device).unsqueeze(0).expand(B, -1, -1)
         for idx, r in enumerate(self.resblocks):
             r._tome_info["size"] = self._tome_info["size"]
             if self.grad_checkpointing and not torch.jit.is_scripting():
                 # TODO: handle kwargs https://github.com/pytorch/pytorch/issues/79887#issuecomment-1161758372
-                x, padding_mask = checkpoint(r, x, None, None, attn_mask, padding_mask)
+                x, padding_mask, pos_tracking = checkpoint(r, x, None, None, attn_mask, padding_mask, pos_tracking)
             else:
-                x, padding_mask = r(x, attn_mask=attn_mask, padding_mask=padding_mask)
+                x, padding_mask, pos_tracking = r(x, attn_mask=attn_mask, padding_mask=padding_mask, pos_tracking=pos_tracking)
             self._tome_info["size"] = r._tome_info["size"]
             hidden_states.append(x)
             padding_masks.append(padding_mask)
+            pos_trackings.append(pos_tracking)
             sizes.append(self._tome_info["size"])
             if padding_mask is not None:
                 ntoks = (padding_mask<0.5).float().sum(-1)
@@ -810,7 +813,7 @@ class ToMEOpenAITransformer(nn.Module):
 
         # if not self.batch_first:
         #     x = x.transpose(0, 1)    # LND -> NLD
-        return x, padding_mask, final_size, {"hidden_states": hidden_states, "padding_masks": padding_masks, "sizes": sizes}
+        return x, padding_mask, final_size, {"hidden_states": hidden_states, "padding_masks": padding_masks, "sizes": sizes, "pos_trackings": pos_trackings}
 
 
 class VisionTransformer(nn.Module):
@@ -1099,7 +1102,11 @@ class AttentionalPoolerWMasking(nn.Module):
         return out
 
 TOME_ARG_NAMES = [
-    "merge_mode", "r_total", "r_schedule", "max_r_per_instance_ratio", "update_threshold", "specified_thresholds"
+    "merge_mode", "r_total", "r_schedule", "max_r_per_instance_ratio", "update_threshold", "specified_thresholds", "repeat_merged_tokens"
+]
+REMOVE_ARGS_FOR_SUPER = [
+    "pretrained_origin_tag",
+    "repeat_merged_tokens",
 ]
 import copy
 class ToMEOpenAIVisionTransformer(VisionTransformer):
@@ -1135,8 +1142,9 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             **kwargs
     ):
         super_kwargs = copy.deepcopy(kwargs)
-        if 'pretrained_origin_tag' in super_kwargs:
-            del super_kwargs["pretrained_origin_tag"]
+        for arg in REMOVE_ARGS_FOR_SUPER:
+            if arg in super_kwargs:
+                del super_kwargs[arg]
 
         super().__init__(
             image_size=image_size,
@@ -1357,7 +1365,8 @@ class ToMEOpenAIVisionTransformer(VisionTransformer):
             pooler_output=pooled,
             hidden_states=tuple(additional_info['hidden_states']),
             padding_masks=tuple(additional_info['padding_masks']),
-            sizes=tuple(additional_info['sizes'])
+            sizes=tuple(additional_info['sizes']),
+            pos_trackings=tuple(additional_info['pos_trackings']),
         )
         
 

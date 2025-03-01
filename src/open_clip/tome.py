@@ -64,6 +64,8 @@ _logger = logging.getLogger(__name__)
 
 ## ToME utils
 
+## ToME utils
+
 
 
 def do_nothing(x, mode=None):
@@ -132,7 +134,6 @@ def bipartite_soft_matching(
             return torch.cat([unm[:, :1], dst[:, :1], unm[:, 1:], dst[:, 1:]], dim=1)
         else:
             return torch.cat([unm, dst], dim=1)
-        
 
     def unmerge(x: torch.Tensor) -> torch.Tensor:
         unm_len = unm_idx.shape[1]
@@ -151,9 +152,8 @@ def bipartite_soft_matching(
 
     return merge, unmerge
 
-
 def merge_wavg(
-    merge: Callable, x: torch.Tensor, size: torch.Tensor = None
+    merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None # (b, s, s_ori)
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Applies the merge function by taking a weighted average based on token size.
@@ -161,12 +161,15 @@ def merge_wavg(
     """
     if size is None:
         size = torch.ones_like(x[..., 0, None])
-
+    
     x = merge(x * size, mode="sum")
     size = merge(size, mode="sum")
     x = x / size
-    return x, size
 
+    if pos_tracking is not None:
+        pos_tracking = merge(pos_tracking, mode="sum")
+
+    return x, size, pos_tracking
 
 def merge_source(
     merge: Callable, x: torch.Tensor, source: torch.Tensor = None
@@ -269,7 +272,7 @@ def batch_level_bipartite_soft_matching(
             rb = sum(node_max > specified_threshold) # merge all tokens over the specified_threshold
         else:
             rb = r * bsz
-        
+
         unm_idx = edge_idx[rb:, :]  # Unmerged Tokens (unmerged_token_num, 1)
         src_idx = edge_idx[:rb, :]  # Merged Tokens (rb, 1)
         dst_idx = node_idx.gather(dim=0, index=src_idx.squeeze()) # (rb,)
@@ -278,7 +281,8 @@ def batch_level_bipartite_soft_matching(
             batch_threshold = None
         else:
             # keep track of batch level threshold for this layer
-            batch_threshold = node_max[edge_idx[rb, 0]]
+            j = rb if rb < len(edge_idx) else len(edge_idx) - 1
+            batch_threshold = node_max[edge_idx[j, 0]]
             batch_threshold = max(batch_threshold, torch.zeros_like(batch_threshold)) # should be non-negative
         # print(scores)
         if class_token:
@@ -390,8 +394,8 @@ def batch_level_bipartite_soft_matching(
     return merge, unmerge, batch_threshold
 
 def batch_level_merge_wavg(
-    merge: Callable, x: torch.Tensor, size: torch.Tensor = None
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None # (b, s, s_ori)
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Applies the merge function by taking a weighted average based on token size.
     Returns the merged tensor and the new token sizes.
@@ -402,6 +406,9 @@ def batch_level_merge_wavg(
     x, padding_mask = merge(x * size, mode="sum")
     size, _ = merge(size, mode="sum")
 
+    if pos_tracking is not None:
+        pos_tracking, _ = merge(pos_tracking, mode="sum")
+
     if padding_mask is not None:
         # Rearrange x, padding_mask, and size so that non-padding instances are at the front
         # padding_mask is 0 for non-padding and 1 for padding
@@ -409,7 +416,9 @@ def batch_level_merge_wavg(
         # Use gather to rearrange x, padding_mask, and size according to sort_indices
         x = x.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, x.size(2)))
         padding_mask = padding_mask.gather(1, sort_indices)
-        size = size.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, size.size(2)))
+        size = size.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, size.size(2))) # (b, s, 1)
+        if pos_tracking is not None:
+            pos_tracking = pos_tracking.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2)))
 
     x = x / size
 
@@ -419,13 +428,41 @@ def batch_level_merge_wavg(
     x = x[:, :max_len]
     padding_mask = padding_mask[:, :max_len]
     size = size[:, :max_len]
-    return x, size, padding_mask
+    if pos_tracking is not None:
+        pos_tracking = pos_tracking[:, :max_len]
+    return x, size, padding_mask, pos_tracking
 
 def batch_level_merge_source(
     merge: Callable, x: torch.Tensor, source: torch.Tensor = None
 ) -> torch.Tensor:
     raise NotImplementedError("Unmerge not implemented yet.")
 
+
+def repeat_merged_tokens_w_pos_tracking(merged_tokens, pos_tracking=None):
+    """
+    Args:
+        merged_tokens (Tensor): shape (B, merged_num, hidden_size)
+        pos_tracking (Tensor, optional): shape (B, merged_num, target_len)
+            For example, suppose merged token num is 2 and target_len is 4;
+            pos_tracking might be:
+                [[1, 0, 0, 1],
+                 [0, 1, 1, 0]]
+            meaning token 0 should be repeated in positions 0 and 3, 
+            and token 1 in positions 1 and 2.
+            
+    Returns:
+        Tensor: shape (B, target_len, hidden_size)
+            Each target position is filled with the corresponding merged token.
+    """
+    if pos_tracking is None:
+        return merged_tokens
+    else:
+        # Ensure pos_tracking is of float type (in case it is provided as a boolean tensor)
+        pos_tracking = pos_tracking.to(merged_tokens.dtype)
+        # Transpose pos_tracking to shape (B, target_len, merged_num)
+        # Then use batch matrix multiplication to "gather" the merged tokens to the target positions
+        repeated_tokens = torch.bmm(pos_tracking.transpose(1, 2), merged_tokens)
+        return repeated_tokens
 ##
 
 
@@ -567,7 +604,7 @@ class ToMEBlock(nn.Module):
                         dist.all_reduce(self.threshold, op=dist.ReduceOp.AVG)
 
         
-    def merge_tokens(self, metric, r, hidden_states, padding_mask=None):
+    def merge_tokens(self, metric, r, hidden_states, padding_mask=None, pos_tracking=None):
         if self._tome_info["merge_mode"] == "instance_level":
             merge, _ = bipartite_soft_matching(
                 metric,
@@ -579,8 +616,8 @@ class ToMEBlock(nn.Module):
                 self._tome_info["source"] = merge_source(
                     merge, hidden_states, self._tome_info["source"]
                 )
-            hidden_states, self._tome_info["size"] = merge_wavg(
-                merge, hidden_states, self._tome_info["size"]
+            hidden_states, self._tome_info["size"], pos_tracking = merge_wavg(
+                merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
             )
         elif self._tome_info["merge_mode"] == "batch_level":
 
@@ -606,13 +643,13 @@ class ToMEBlock(nn.Module):
                 specified_threshold = specified_threshold
             )
             if merge != do_nothing:
-                hidden_states, self._tome_info["size"], padding_mask = batch_level_merge_wavg(
-                    merge, hidden_states, self._tome_info["size"]
+                hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
+                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
                 )
                 if self.training or self.update_threshold:
                     self.threshold_running_avg(batch_threshold)
             
-        return hidden_states, padding_mask
+        return hidden_states, padding_mask, pos_tracking
 
     def _get_attn_mask_from_padding_mask(self, padding_mask, dtype):
         """
@@ -629,6 +666,7 @@ class ToMEBlock(nn.Module):
     def forward(self, 
         x: torch.Tensor,  
         padding_mask: Optional[torch.Tensor] = None,
+        pos_tracking: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         residual = x
         x = self.norm1(x)
@@ -648,13 +686,14 @@ class ToMEBlock(nn.Module):
         # x = x + self.drop_path1(self.ls1(self.attn())) 
         r = self._tome_info["r"]
         if r > 0:
-            x, padding_mask = self.merge_tokens(metric, r, x, padding_mask=padding_mask)
+            x, padding_mask, pos_tracking = self.merge_tokens(metric, r, x, padding_mask=padding_mask, pos_tracking=pos_tracking)
         
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
 
         outputs = {
             "hidden_states": x,
-            "padding_mask": padding_mask
+            "padding_mask": padding_mask,
+            "pos_tracking": pos_tracking
         }
         return outputs
 
@@ -794,6 +833,7 @@ class CLIPVisionEncoderToMEOutput(ModelOutput):
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     sizes: Optional[Tuple[torch.FloatTensor, ...]] = None
     padding_masks: Optional[Tuple[torch.FloatTensor, ...]] = None
+    pos_trackings: Optional[Tuple[torch.IntTensor, ...]] = None
 
 class ToMEVisionTransformer(VisionTransformer):
     """ Vision Transformer
@@ -1065,27 +1105,25 @@ class ToMEVisionTransformer(VisionTransformer):
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         self._tome_info["size"] = None
         self._tome_info["source"] = None
-
+        
         x = self.patch_embed(x)
         x = self._pos_embed(x)
         x = self.patch_drop(x)
         x = self.norm_pre(x)
 
-        # if self.grad_checkpointing and not torch.jit.is_scripting():
-        #     x = checkpoint_seq(self.blocks, x)
-        # else:
-        #     x = self.blocks(x)
-        
         # using self.blocks as a nn.ModuleList
         self.output_stats = {}
         padding_mask = None
+        B, N = x.shape[:2]
+        pos_tracking = torch.eye(N, dtype=torch.int32, device=x.device).unsqueeze(0).expand(B, -1, -1)
         for idx, block in enumerate(self.blocks):
             block._tome_info["size"] = self._tome_info["size"]
             if self.grad_checkpointing and not torch.jit.is_scripting():
-                outputs = checkpoint(block, x, padding_mask)
+                outputs = checkpoint(block, x, padding_mask, pos_tracking)
             else:
-                outputs = block(x, padding_mask=padding_mask)
+                outputs = block(x, padding_mask=padding_mask, pos_tracking=pos_tracking)
             x, padding_mask = outputs["hidden_states"], outputs["padding_mask"]
+            pos_tracking = outputs["pos_tracking"]
             self._tome_info["size"] = block._tome_info["size"]
             if padding_mask is not None:
                 ntoks = (padding_mask<0.5).float().sum(-1)
@@ -1095,7 +1133,7 @@ class ToMEVisionTransformer(VisionTransformer):
             self.output_stats[f"block_{idx}_ntoks"] = ntoks
         final_size = self._tome_info["size"]
         x = self.norm(x)
-        return x, padding_mask, final_size
+        return x, padding_mask, final_size, pos_tracking
 
     def forward_features_all_layers(self, x: torch.Tensor # (B, C, H, W)
                                     ) -> torch.Tensor:
@@ -1112,18 +1150,23 @@ class ToMEVisionTransformer(VisionTransformer):
         hidden_states = []
         padding_masks = []
         sizes = []
+        pos_trackings = []
         padding_mask = None
         self.output_stats = {}
+        B, N = x.shape[:2]
+        pos_tracking = torch.eye(N, dtype=torch.int32, device=x.device).unsqueeze(0).expand(B, -1, -1)
         for idx, block in enumerate(self.blocks):
             block._tome_info["size"] = self._tome_info["size"]
             if self.grad_checkpointing and not torch.jit.is_scripting():
-                outputs = checkpoint(block, x, padding_mask)
+                outputs = checkpoint(block, x, padding_mask, pos_tracking)
             else:
-                outputs = block(x, padding_mask=padding_mask)
+                outputs = block(x, padding_mask=padding_mask, pos_tracking=pos_tracking)
             x, padding_mask = outputs["hidden_states"], outputs["padding_mask"]
+            pos_tracking = outputs["pos_tracking"]
             self._tome_info["size"] = block._tome_info["size"]
             hidden_states.append(x)
             padding_masks.append(padding_mask)
+            pos_trackings.append(pos_tracking)
             sizes.append(self._tome_info["size"])
             # track number of tokens after each block
             if padding_mask is not None:
@@ -1138,7 +1181,8 @@ class ToMEVisionTransformer(VisionTransformer):
             last_hidden_state=x,
             hidden_states=tuple(hidden_states),
             padding_masks=tuple(padding_masks),
-            sizes=tuple(sizes)
+            sizes=tuple(sizes),
+            pos_trackings=tuple(pos_trackings)
         )
 
     def pool(self, 
@@ -1172,7 +1216,7 @@ class ToMEVisionTransformer(VisionTransformer):
         return x if pre_logits else self.head(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, padding_mask, final_size = self.forward_features(x)
+        x, padding_mask, final_size, pos_tracking = self.forward_features(x)
         x = self.forward_head(x, padding_mask=padding_mask, size=final_size)
         return x
 

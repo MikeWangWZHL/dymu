@@ -17,12 +17,12 @@ model_name = "ViT-B-16-SigLIP-384-tome-72out"
 # timm_kwargs = {"r_total": 0}
 timm_kwargs = {
     # 'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_models_share/datacomp_tome_1e-6_model_ViT-B-16-SigLIP-384-tome-72out_evalmode/vision_checkpoint/epoch_20.pt",
-    'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-B-16-SigLIP-384-tome-384out.pth",
+    'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-B-16-SigLIP-384-tome-72out.pth",
     # 'pretrained': "webli",
     'pretrained_origin_tag': "webli",
     # 'merge_mode': "instance_level",
     'merge_mode': "batch_level",
-    "r_total":432,
+    "r_total":504,
     # "r_total":0,
     # "specified_thresholds":[0.98046875, 0.90234375, 0.875, 0.8828125, 0.875, 0.8828125, 0.890625, 0.890625, 0.8828125, 0.890625, 0.875, 0.875]
     # "specified_thresholds":[0.9] * 12
@@ -59,9 +59,9 @@ image = torch.stack(image, dim=0)
 tome_vision_encoder = model.visual.trunk
 # tome_vision_encoder.to(dtype=torch.bfloat16)
 # image = image.to(dtype=torch.bfloat16)
-tome_vision_encoder.to("cuda:3")
+tome_vision_encoder.to("cuda:0")
 tome_vision_encoder.to(dtype=torch.float16)
-image = image.to("cuda:3")
+image = image.to("cuda:0")
 image = image.to(dtype=torch.float16)
 
 for name, param in tome_vision_encoder.named_parameters():
