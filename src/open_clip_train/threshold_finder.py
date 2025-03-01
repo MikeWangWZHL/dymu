@@ -117,8 +117,8 @@ def main():
         model, _, preprocess = open_clip.create_model_and_transforms(
             args.model, pretrained=args.pretrained, precision='bf16')
         model.train()
-    _, _, preprocess = open_clip.create_model_and_transforms(
-        "ViT-L-16-SigLIP-384", pretrained="webli", precision='bf16')
+    # _, _, preprocess = open_clip.create_model_and_transforms(
+    #     "ViT-L-16-SigLIP-384", pretrained="webli", precision='bf16')
     model.cuda()
     model = DDP(model, device_ids=[rank], output_device=rank)
     
