@@ -1,4 +1,5 @@
 import os
+import ipdb
 import torch
 import argparse
 import torch.distributed as dist
@@ -8,6 +9,7 @@ from PIL import Image
 import tqdm
 import open_clip
 import json
+from llava.model.multimodal_encoder.tome_encoder import SigLipVisionModelTome, SigLipVisionConfigTome, SigLipImageProcessor
 
 def setup_distributed():
     dist.init_process_group("nccl")
@@ -36,8 +38,46 @@ class ImageConversationDataset(Dataset):
         except:
             print(item)
         image = Image.open(image_path).convert("RGB")
-        image_tensor = self.preprocess(image)
+        try:
+            image_tensor = self.preprocess(image)
+        except:
+            image_tensor = self.preprocess.preprocess(images=image, return_tensors="pt").pixel_values[0]
         return image_tensor
+
+
+
+def load_siglip_tome_llava_ov(
+        model_name_or_path = "google/siglip-so400m-patch14-384",
+        overwrite_config = None, 
+        device_map = "auto",   
+    ):
+    config = SigLipVisionConfigTome()
+    processor = SigLipImageProcessor()
+    
+    if overwrite_config is not None:
+        for key in overwrite_config:
+            if hasattr(config, key):
+                setattr(config, key, overwrite_config[key])
+
+    print(f"Loading vision tower: {model_name_or_path} with SigLipVisionModelTome class.")
+    print(f"Config: {config}")
+    
+    # Step 1: Initialize model with updated self.config
+    model = SigLipVisionModelTome(config)  # Directly pass self.config
+
+    # Step 2: Load pretrained weights from checkpoint
+    state_dict = SigLipVisionModelTome.from_pretrained(model_name_or_path, device_map=device_map).state_dict()
+    
+    # Step 3: Load the state_dict into the initialized model
+    model.load_state_dict(state_dict, strict=False)  # `strict=False` allows partial mismatches: thresholds
+
+    if config.set_training_mode:
+        model.train()
+    else:
+        model.eval()
+    return model, processor
+
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train an image conversation model with CLIP")
@@ -54,9 +94,31 @@ def main():
     setup_distributed()
     rank = dist.get_rank()
     
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        args.model, pretrained=args.pretrained, precision='bf16')
-    model.train()
+    if args.model.startswith("google/siglip-so400m-patch14-384"):
+            model_name_or_path = "google/siglip-so400m-patch14-384"
+            rem_txt = args.model[len("google/siglip-so400m-patch14-384")+1:]
+            assert rem_txt.split('-')[0][-3:] == "out"
+            r = int(rem_txt.split('-')[0][:-3])
+            if len(rem_txt.split('-'))>1:
+                schedule = rem_txt.split('-')[1]
+            else:
+                schedule = "constant"
+            tome_kwargs = {
+                "r_total": r,
+                "r_schedule": schedule,
+                "set_training_mode": True,
+            }
+            print(f'Using tome kwargs as {tome_kwargs}')
+            model, preprocess = load_siglip_tome_llava_ov(model_name_or_path=model_name_or_path, overwrite_config=tome_kwargs,device_map="cpu")
+            # preprocess = lambda x: image_processor.preprocess(images=x, return_tensors="pt").pixel_values[0]
+            model.train()
+            model.to(torch.bfloat16)
+    else:
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            args.model, pretrained=args.pretrained, precision='bf16')
+        model.train()
+    _, _, preprocess = open_clip.create_model_and_transforms(
+        "ViT-L-16-SigLIP-384", pretrained="webli", precision='bf16')
     model.cuda()
     model = DDP(model, device_ids=[rank], output_device=rank)
     
