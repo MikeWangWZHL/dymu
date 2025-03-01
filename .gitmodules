@@ -9,4 +9,4 @@
 	url = https://github.com/MikeWangWZHL/LLaMA-Factory-tome.git
 [submodule "LLaVA-NeXT"]
 	path = LLaVA-NeXT
-	url = https://github.com/MikeWangWZHL/LLaVA-Next-tome.git
+	url = git@github.com:MikeWangWZHL/LLaVA-Next-tome.git
