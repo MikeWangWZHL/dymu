@@ -128,7 +128,8 @@ def main():
     dataloader = DataLoader(dataset, batch_size=args.batch_size, sampler=sampler)
     count = 0
     with torch.no_grad():
-        for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=(rank != 0)):
+        # for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=(rank != 0)):
+        for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=True):
             count +=1
             out = model(batch.to(f"cuda:{rank}").to(torch.bfloat16))
             tmp_dict = {k: v.cpu().item() for k, v in model.state_dict().items() if 'threshold' in k}
