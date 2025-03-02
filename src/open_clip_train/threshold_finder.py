@@ -131,7 +131,7 @@ def main():
         for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=(rank != 0)):
             count +=1
             out = model(batch.to(f"cuda:{rank}").to(torch.bfloat16))
-            tmp_dict = {k: v for k, v in model.state_dict().items() if 'threshold' in k}
+            tmp_dict = {k: v.cpu().item() for k, v in model.state_dict().items() if 'threshold' in k}
             # print(f'Model name: {args.model}')
             # print(json.dumps(tmp_dict, indent=2))
             # Print the model state dict for keys containing 'threshold'
