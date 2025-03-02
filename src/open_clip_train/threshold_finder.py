@@ -1,4 +1,5 @@
 import os
+import sys
 import ipdb
 import torch
 import argparse
@@ -125,17 +126,28 @@ def main():
     dataset = ImageConversationDataset(args.im_base_path, args.json_path, preprocess)
     sampler = DistributedSampler(dataset)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, sampler=sampler)
-    
+    count = 0
     with torch.no_grad():
         for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=(rank != 0)):
-            out = model(batch.to("cuda").to(torch.bfloat16))
+            count +=1
+            out = model(batch.to(f"cuda:{rank}").to(torch.bfloat16))
+            tmp_dict = {k: v for k, v in model.state_dict().items() if 'threshold' in k}
+            # print(f'Model name: {args.model}')
+            # print(json.dumps(tmp_dict, indent=2))
+            # Print the model state dict for keys containing 'threshold'
+            print_str = f'Model name: {args.model}\n' + json.dumps(tmp_dict, indent=2)
+            sys.stdout.write(f'\r{print_str}')
+            sys.stdout.flush()
+
+    
+
     
     if rank == 0:
         checkpoint_dict = {"name": args.model, "state_dict": model.state_dict()}
         torch.save(checkpoint_dict, args.save_path)
-        print(f'Saving model to {args.save_path}')
+        print(f'Model name: {args.model}, Saving model to {args.save_path}')
     
-    cleanup_distributed()
+    # cleanup_distributed()
 
 if __name__ == "__main__":
     main()
