@@ -393,8 +393,48 @@ def batch_level_bipartite_soft_matching(
 
     return merge, unmerge, batch_threshold
 
+# def batch_level_merge_wavg(
+#     merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None # (b, s, s_ori)
+# ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+#     """
+#     Applies the merge function by taking a weighted average based on token size.
+#     Returns the merged tensor and the new token sizes.
+#     """
+#     if size is None:
+#         size = torch.ones_like(x[..., 0, None])
+
+#     x, padding_mask = merge(x * size, mode="sum")
+#     size, _ = merge(size, mode="sum")
+
+#     if pos_tracking is not None:
+#         pos_tracking, _ = merge(pos_tracking, mode="sum")
+
+#     if padding_mask is not None:
+#         # Rearrange x, padding_mask, and size so that non-padding instances are at the front
+#         # padding_mask is 0 for non-padding and 1 for padding
+#         sort_indices = torch.argsort(padding_mask, dim=1)
+#         # Use gather to rearrange x, padding_mask, and size according to sort_indices
+#         x = x.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, x.size(2)))
+#         padding_mask = padding_mask.gather(1, sort_indices)
+#         size = size.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, size.size(2))) # (b, s, 1)
+#         if pos_tracking is not None:
+#             pos_tracking = pos_tracking.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2)))
+
+#     x = x / size
+
+#     # Truncate to the maximum length
+#     # max_len = int((1 - padding_mask).sum(dim=-1).max().item()) # this causes incorrect max_len calculation
+#     max_len = int((1 - padding_mask).to(torch.int64).sum(dim=-1).max().item())
+#     x = x[:, :max_len]
+#     padding_mask = padding_mask[:, :max_len]
+#     size = size[:, :max_len]
+#     if pos_tracking is not None:
+#         pos_tracking = pos_tracking[:, :max_len]
+#     return x, size, padding_mask, pos_tracking
+
 def batch_level_merge_wavg(
-    merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None # (b, s, s_ori)
+    merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None, # (b, s, s_ori)
+    cls_token: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Applies the merge function by taking a weighted average based on token size.
@@ -409,7 +449,40 @@ def batch_level_merge_wavg(
     if pos_tracking is not None:
         pos_tracking, _ = merge(pos_tracking, mode="sum")
 
-    if padding_mask is not None:
+    assert padding_mask is not None
+    if cls_token:
+        if x.size(1) > 1:
+            # Separate the cls token (first token)
+            cls_token_x = x[:, :1, :]
+            cls_token_padding = padding_mask[:, :1]
+            cls_token_size = size[:, :1, :]
+            if pos_tracking is not None:
+                cls_token_pos = pos_tracking[:, :1, :]
+            # Process the rest of the tokens (from index 1 onward)
+            rest_x = x[:, 1:]
+            rest_padding_mask = padding_mask[:, 1:]
+            rest_size = size[:, 1:]
+            if pos_tracking is not None:
+                rest_pos_tracking = pos_tracking[:, 1:]
+            # Sort only the rest tokens based on the padding mask
+            sort_indices = torch.argsort(rest_padding_mask, dim=1)
+            rest_x = rest_x.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, x.size(2)))
+            rest_padding_mask = rest_padding_mask.gather(1, sort_indices)
+            rest_size = rest_size.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, size.size(2)))
+            if pos_tracking is not None:
+                rest_pos_tracking = rest_pos_tracking.gather(
+                    1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2))
+                )
+            # Recombine the unchanged cls token with the sorted tokens
+            x = torch.cat([cls_token_x, rest_x], dim=1)
+            padding_mask = torch.cat([cls_token_padding, rest_padding_mask], dim=1)
+            size = torch.cat([cls_token_size, rest_size], dim=1)
+            if pos_tracking is not None:
+                pos_tracking = torch.cat([cls_token_pos, rest_pos_tracking], dim=1)
+        else:
+            # if there is only one token, do nothing
+            pass
+    else:
         # Rearrange x, padding_mask, and size so that non-padding instances are at the front
         # padding_mask is 0 for non-padding and 1 for padding
         sort_indices = torch.argsort(padding_mask, dim=1)
@@ -424,7 +497,9 @@ def batch_level_merge_wavg(
 
     # Truncate to the maximum length
     # max_len = int((1 - padding_mask).sum(dim=-1).max().item()) # this causes incorrect max_len calculation
-    max_len = int((1 - padding_mask).to(torch.int64).sum(dim=-1).max().item())
+    # max_len = int((1 - padding_mask).to(torch.int64).sum(dim=-1).max().item()) # 0 for non-padding, 1 for padding
+    max_len = int((padding_mask < 0.5).to(torch.int64).sum(dim=-1).max().item()) # 0 for non-padding, 1 for padding
+
     x = x[:, :max_len]
     padding_mask = padding_mask[:, :max_len]
     size = size[:, :max_len]
@@ -644,7 +719,7 @@ class ToMEBlock(nn.Module):
             )
             if merge != do_nothing:
                 hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
-                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
+                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking, cls_token=self._tome_info["class_token"]
                 )
                 if self.training or self.update_threshold:
                     self.threshold_running_avg(batch_threshold)

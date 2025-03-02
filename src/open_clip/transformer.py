@@ -450,7 +450,7 @@ class ToMEResidualAttentionBlock(nn.Module):
             )
             if merge != do_nothing:
                 hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
-                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
+                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking, cls_token=self._tome_info["class_token"]
                 )
                 if self.training or self.update_threshold:
                     self.threshold_running_avg(batch_threshold)
