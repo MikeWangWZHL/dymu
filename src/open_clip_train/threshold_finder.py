@@ -105,7 +105,7 @@ def main():
             else:
                 schedule = "constant"
             tome_kwargs = {
-                "r_total": r,
+                "r_total": 729-r,
                 "r_schedule": schedule,
                 "set_training_mode": True,
             }
