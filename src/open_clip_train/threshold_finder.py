@@ -30,7 +30,7 @@ class ImageConversationDataset(Dataset):
         self.preprocess = preprocess
 
     def __len__(self):
-        return min(len(self.data), 128*1000)
+        return min(len(self.data), 128*500)
 
     def __getitem__(self, idx):
         item = self.data[idx]
