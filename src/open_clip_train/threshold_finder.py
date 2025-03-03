@@ -128,17 +128,16 @@ def main():
     dataloader = DataLoader(dataset, batch_size=args.batch_size, sampler=sampler)
     count = 0
     with torch.no_grad():
-        # for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=(rank != 0)):
-        for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=True):
+        for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=(rank != 0)):
             count +=1
             out = model(batch.to(f"cuda:{rank}").to(torch.bfloat16))
-            tmp_dict = {k: v.cpu().item() for k, v in model.state_dict().items() if 'threshold' in k}
+            # tmp_dict = {k: v.cpu().item() for k, v in model.state_dict().items() if 'threshold' in k}
             # print(f'Model name: {args.model}')
             # print(json.dumps(tmp_dict, indent=2))
             # Print the model state dict for keys containing 'threshold'
-            print_str = f'Model name: {args.model}\n' + json.dumps(tmp_dict, indent=2)
-            sys.stdout.write(f'\r{print_str}')
-            sys.stdout.flush()
+            # print_str = f'Model name: {args.model}\n' + json.dumps(tmp_dict, indent=2)
+            # sys.stdout.write(f'\r{print_str}')
+            # sys.stdout.flush()
 
     
 
