@@ -359,7 +359,7 @@ def batch_level_bipartite_soft_matching(
         x_new = x.clone()
         x_new[..., :src.size(1), :] = src
         x_new[..., src.size(1):, :] = dst_new
-
+        x_new[src_b, src_s, :] = torch.zeros_like(src[src_b, src_s, :])
         if padding_mask is not None:
             padding_mask_src, padding_mask_dst = padding_mask[..., ::2].clone(), padding_mask[..., 1::2].clone()
             padding_mask_src[src_b, src_s] = 1
@@ -493,7 +493,7 @@ def batch_level_merge_wavg(
         if pos_tracking is not None:
             pos_tracking = pos_tracking.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2)))
 
-    x = x / size
+    x = x / (size+1e-8)
 
     # Truncate to the maximum length
     # max_len = int((1 - padding_mask).sum(dim=-1).max().item()) # this causes incorrect max_len calculation
@@ -1487,6 +1487,9 @@ def vit_base_patch16_siglip_384_tome_72out_linear(pretrained: bool = False, **kw
         pretrained=pretrained, 
         block_fn=ToMEBlock, **dict(model_args, **kwargs))
     return model
+
+
+
 
 
 # for llava-one-vision

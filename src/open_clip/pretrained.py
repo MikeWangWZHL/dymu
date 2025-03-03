@@ -431,6 +431,8 @@ _PRETRAINED = {
     "ViT-L-14-336-tome-72out": _VITL14_336,
     "ViT-L-14-336-tome-72out-linear": _VITL14_336,
     "ViT-L-14-336-tome-192out": _VITL14_336,
+    "ViT-L-14-336-tome-192out-linear": _VITL14_336,
+    "ViT-L-14-336-tome-192out-reverse-linear": _VITL14_336,
     "ViT-L-14-336-tome-384out": _VITL14_336,
     "ViT-L-14-336-tome-480out": _VITL14_336,
     "ViT-H-14": _VITH14,

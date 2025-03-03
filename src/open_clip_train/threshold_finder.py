@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import ipdb
 import torch
 import argparse
@@ -30,7 +31,7 @@ class ImageConversationDataset(Dataset):
         self.preprocess = preprocess
 
     def __len__(self):
-        return min(len(self.data), 128*500)
+        return min(len(self.data), 128*2000)
 
     def __getitem__(self, idx):
         item = self.data[idx]
@@ -91,13 +92,20 @@ def parse_args():
     return parser.parse_args()
 
 def main():
+        
     args = parse_args()
     setup_distributed()
     rank = dist.get_rank()
+    if os.path.exists(args.save_path):
+        return
+    elif rank==0:
+        time.sleep(30)
+        torch.save(torch.tensor(1.0), args.save_path)
     
     if args.model.startswith("google/siglip-so400m-patch14-384"):
             model_name_or_path = "google/siglip-so400m-patch14-384"
             rem_txt = args.model[len("google/siglip-so400m-patch14-384")+1:]
+            print(f'Rem text is {rem_txt}')
             assert rem_txt.split('-')[0][-3:] == "out"
             r = int(rem_txt.split('-')[0][:-3])
             if len(rem_txt.split('-'))>1:
@@ -131,9 +139,10 @@ def main():
         for batch in tqdm.tqdm(dataloader, desc="dataloader", disable=(rank != 0)):
             count +=1
             out = model(batch.to(f"cuda:{rank}").to(torch.bfloat16))
-            # tmp_dict = {k: v.cpu().item() for k, v in model.state_dict().items() if 'threshold' in k}
-            # print(f'Model name: {args.model}')
-            # print(json.dumps(tmp_dict, indent=2))
+            if count > len(dataloader)-5:
+                tmp_dict = {k: v.cpu().item() for k, v in model.state_dict().items() if 'threshold' in k}
+                print(f'Model name: {args.model}')
+                print(json.dumps(tmp_dict, indent=2))
             # Print the model state dict for keys containing 'threshold'
             # print_str = f'Model name: {args.model}\n' + json.dumps(tmp_dict, indent=2)
             # sys.stdout.write(f'\r{print_str}')
