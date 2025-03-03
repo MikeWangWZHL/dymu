@@ -20,10 +20,11 @@ def find_max_r_ratio(full_length, target_min_num, original_r_total, num_layers):
     x = (full_length - target_min_num) / (original_r_per_instance * num_layers)
     return x
 
-
-max_r_per_instance_ratio = find_max_r_ratio(577, 24, 504, 24)
-print(max_r_per_instance_ratio)
-tome_kwargs = {"r_total": 504, "max_r_per_instance_ratio":max_r_per_instance_ratio} # min remaining tokens: 577 - (504 * 1.07) = 23.08
+# max_r_per_instance_ratio = find_max_r_ratio(577, 24, 504, 24)
+# print(max_r_per_instance_ratio)
+# tome_kwargs = {"r_total": 504, "max_r_per_instance_ratio":max_r_per_instance_ratio} # min remaining tokens: 577 - (504 * 1.07) = 23.08
+# tome_kwargs = {"r_total": 504, "merge_mode": "instance_level"}
+tome_kwargs = {}
 
 # model_name = "ViT-L-14-336-tome-72out" # with quickgelu
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', **tome_kwargs)
@@ -31,7 +32,13 @@ tome_kwargs = {"r_total": 504, "max_r_per_instance_ratio":max_r_per_instance_rat
 model_name = "ViT-L-14-336-tome-72out" # with quickgelu
 model, _, preprocess = open_clip.create_model_and_transforms(
     model_name, 
-    pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_v2/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', 
+    # pretrained='openai', 
+    pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', 
+    # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-192out.pth', 
+    # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-384out.pth', 
+    # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-480out.pth', 
+    # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-192out-linear.pth', 
+    # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-192out-reverse-linear.pth', 
     **tome_kwargs
 )
 
@@ -78,9 +85,9 @@ image = [preprocess(Image.open(p)) for p in img_paths] # (2, 3, 336, 336)
 image = torch.stack(image, dim=0)
 
 tome_vision_encoder = model.visual.trunk if hasattr(model.visual, "trunk") else model.visual
-tome_vision_encoder.to("cuda:2")
+tome_vision_encoder.to("cuda:0")
 tome_vision_encoder.to(dtype=torch.float16)
-image = image.to("cuda:2")
+image = image.to("cuda:0")
 image = image.to(dtype=torch.float16)
 
 # for name, param in tome_vision_encoder.named_parameters():
@@ -92,6 +99,8 @@ hidden_states = outputs.hidden_states
 padding_masks = outputs.padding_masks # b, n
 if padding_masks[-1] is not None:
     print("remaining tokens: ", (padding_masks[-1]==0).sum())
-
+pos_trackings = outputs.pos_trackings
+cls_tracking = pos_trackings[0][0]
+print(cls_tracking)
 import pdb; pdb.set_trace()
 

@@ -12,12 +12,13 @@ import os
 # model_name = "ViT-B-16-SigLIP-384-tome-no-merge"
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='webli')
 
+model_name = "ViT-B-16-SigLIP-384-tome-384out"
 # model_name = "ViT-B-16-SigLIP-384-tome-192out"
-model_name = "ViT-B-16-SigLIP-384-tome-72out"
+# model_name = "ViT-B-16-SigLIP-384-tome-72out"
 # timm_kwargs = {"r_total": 0}
 timm_kwargs = {
     # 'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_models_share/datacomp_tome_1e-6_model_ViT-B-16-SigLIP-384-tome-72out_evalmode/vision_checkpoint/epoch_20.pt",
-    'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-B-16-SigLIP-384-tome-72out.pth",
+    'pretrained': "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-B-16-SigLIP-384-tome-384out.pth",
     # 'pretrained': "webli",
     'pretrained_origin_tag': "webli",
     # 'merge_mode': "instance_level",
