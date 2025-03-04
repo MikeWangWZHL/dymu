@@ -1070,6 +1070,8 @@ class AttentionalPoolerWMasking(nn.Module):
         full_bias = None
         # If size is provided, compute a bias from it.
         if size is not None:
+            # replace all 0s with 1s
+            size = torch.where(size < 0.5, torch.ones_like(size), size)
             # Assume size has shape [B, L, 1]
             # Log transform and squeeze the last dim to get [B, L]
             size_bias_log = size.log()[:, :, 0]

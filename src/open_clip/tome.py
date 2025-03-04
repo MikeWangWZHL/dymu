@@ -493,7 +493,7 @@ def batch_level_merge_wavg(
         if pos_tracking is not None:
             pos_tracking = pos_tracking.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2)))
 
-    x = x / (size+1e-8)
+    x = x / (size+1e-4)
 
     # Truncate to the maximum length
     # max_len = int((1 - padding_mask).sum(dim=-1).max().item()) # this causes incorrect max_len calculation
@@ -802,6 +802,8 @@ class AttentionPoolLatentWMasking(AttentionPoolLatent):
 
         full_bias = None
         if size is not None:
+            # replace all 0s with 1s
+            size = torch.where(size < 0.5, torch.ones_like(size), size)
             size_bias_log = size.log()[:, :, 0] # (b, src_len, 1) -> (b, src_len)
             size_bias_log = size_bias_log.unsqueeze(1).unsqueeze(1).expand(B, self.num_heads, 1, N) # (b, src_len) -> (b, num_heads, 1, src_len)
             full_bias = size_bias_log
