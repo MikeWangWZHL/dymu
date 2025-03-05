@@ -30,6 +30,7 @@ tome_kwargs = {}
 # model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune/threshold_checkpoints/ViT-L-14-336-tome-72out.pth', **tome_kwargs)
 
 model_name = "ViT-L-14-336-tome-72out" # with quickgelu
+# model_name = "ViT-L-14-336-tome-192out" # with quickgelu
 model, _, preprocess = open_clip.create_model_and_transforms(
     model_name, 
     # pretrained='openai', 
@@ -39,6 +40,7 @@ model, _, preprocess = open_clip.create_model_and_transforms(
     # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-480out.pth', 
     # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-192out-linear.pth', 
     # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-192out-reverse-linear.pth', 
+    # pretrained='/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-192out_PIXMO.pth', 
     **tome_kwargs
 )
 
@@ -76,19 +78,26 @@ for i, block in enumerate(blocks):
 print(learned_thresholds)
 import pdb; pdb.set_trace()
 
+
+# check feature length
+device = "cuda:1"
+tome_vision_encoder = model.visual.trunk if hasattr(model.visual, "trunk") else model.visual
+tome_vision_encoder.to(device)
+tome_vision_encoder.eval()
+
 img_paths = [
-    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/simple_circle.png",
-    # "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00453/004539375.jpg",
-    # "/shared/nas2/wangz3/salesforce_intern_nas2/llava_1_5_data/stage1/LLaVA-Pretrain/00511/005116462.jpg"
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/dalle_images/level0.png",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/dalle_images/level1.png",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/dalle_images/level2.png",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/dalle_images/level3.png",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/dalle_images/level4.png",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/generated_images/cumulative_shapes_1.png",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/generated_images/cumulative_shapes_5.png",
+    "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/qualitative_example_generator/generated_images/cumulative_shapes_20.png",
 ]
 image = [preprocess(Image.open(p)) for p in img_paths] # (2, 3, 336, 336)
 image = torch.stack(image, dim=0)
-
-tome_vision_encoder = model.visual.trunk if hasattr(model.visual, "trunk") else model.visual
-tome_vision_encoder.to("cuda:0")
-tome_vision_encoder.to(dtype=torch.float16)
-image = image.to("cuda:0")
-image = image.to(dtype=torch.float16)
+image = image.to(device)
 
 # for name, param in tome_vision_encoder.named_parameters():
 #     print(f"{name}: {param.dtype}")
@@ -98,9 +107,13 @@ outputs = tome_vision_encoder.forward_features_all_layers(image)
 hidden_states = outputs.hidden_states
 padding_masks = outputs.padding_masks # b, n
 if padding_masks[-1] is not None:
-    print("remaining tokens: ", (padding_masks[-1]==0).sum())
-pos_trackings = outputs.pos_trackings
-cls_tracking = pos_trackings[0][0]
-print(cls_tracking)
+    for img_p, mask in zip(img_paths, padding_masks[-1]):
+        print(img_p.split("/")[-1])
+        print("remaining tokens: ", (mask<0.5).sum())
+        print()
+    # print("remaining tokens: ", (padding_masks[-1]==0).sum())
+# pos_trackings = outputs.pos_trackings
+# cls_tracking = pos_trackings[0][0]
+# print(cls_tracking)
 import pdb; pdb.set_trace()
 
