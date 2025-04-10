@@ -425,6 +425,7 @@ class ToMEResidualAttentionBlock(nn.Module):
             hidden_states, self._tome_info["size"], pos_tracking = merge_wavg(
                 merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
             )
+
         elif self._tome_info["merge_mode"] == "batch_level":
 
             if not self.training and not self.update_threshold:
@@ -439,21 +440,37 @@ class ToMEResidualAttentionBlock(nn.Module):
                 max_r_per_instance = None
             else:
                 max_r_per_instance = int(self._tome_info["max_r_per_instance_ratio"] * r)
-            merge, _, batch_threshold = batch_level_bipartite_soft_matching(
-                metric,
-                r,
-                self._tome_info["class_token"],
-                self._tome_info["distill_token"],
-                padding_mask = padding_mask,
-                max_r_per_instance = max_r_per_instance,
-                specified_threshold = specified_threshold
-            )
-            if merge != do_nothing:
-                hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
-                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking, cls_token=self._tome_info["class_token"]
+
+            B = hidden_states.shape[0]
+            if specified_threshold is not None and B == 1:
+                # inference time; use efficient instance-level with threshold version
+                merge, _ = bipartite_soft_matching(
+                    metric,
+                    r,
+                    self._tome_info["class_token"],
+                    self._tome_info["distill_token"],
+                    specified_threshold=specified_threshold,
+                    max_r_per_instance=max_r_per_instance
                 )
-                if self.training or self.update_threshold:
-                    self.threshold_running_avg(batch_threshold)
+                hidden_states, self._tome_info["size"], pos_tracking = merge_wavg(
+                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
+                )
+            else:
+                merge, _, batch_threshold = batch_level_bipartite_soft_matching(
+                    metric,
+                    r,
+                    self._tome_info["class_token"],
+                    self._tome_info["distill_token"],
+                    padding_mask = padding_mask,
+                    max_r_per_instance = max_r_per_instance,
+                    specified_threshold = specified_threshold
+                )
+                if merge != do_nothing:
+                    hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
+                        merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking, cls_token=self._tome_info["class_token"]
+                    )
+                    if self.training or self.update_threshold:
+                        self.threshold_running_avg(batch_threshold)
             
         return hidden_states, padding_mask, pos_tracking
 

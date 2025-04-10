@@ -64,10 +64,6 @@ _logger = logging.getLogger(__name__)
 
 ## ToME utils
 
-## ToME utils
-
-
-
 def do_nothing(x, mode=None):
     return x
 
@@ -77,6 +73,8 @@ def bipartite_soft_matching(
     r: int,
     class_token: bool = False,
     distill_token: bool = False,
+    specified_threshold: Optional[float] = None,
+    max_r_per_instance: Optional[int] = None
 ) -> Tuple[Callable, Callable]:
     """
     Applies ToMe with a balanced matching set (50%, 50%).
@@ -114,6 +112,23 @@ def bipartite_soft_matching(
             scores[..., :, 0] = -math.inf
 
         node_max, node_idx = scores.max(dim=-1)
+
+        # If a threshold is provided, adjust r per instance based on token scores.
+        if specified_threshold is not None:
+            assert metric.shape[0], "batch size have to be 1"
+            # Count, per instance, how many token-pairs exceed the threshold.
+            merge_counts = (node_max > specified_threshold).sum(dim=-1)
+            # Use the minimum count across the batch as the effective number to merge.
+            r_effective = int(merge_counts[0].item())
+            # r = min(r, r_effective)
+            r = min(r_effective, (t - protected) // 2)
+        
+            if r <= 0:
+                return do_nothing, do_nothing
+        
+        if max_r_per_instance is not None:
+            r = min(r, max_r_per_instance)
+
         edge_idx = node_max.argsort(dim=-1, descending=True)[..., None]
 
         unm_idx = edge_idx[..., r:, :]  # Unmerged Tokens
@@ -186,7 +201,281 @@ def merge_source(
     return source
 
 
-#####################
+# #####################
+# def batch_level_bipartite_soft_matching(
+#     metric: torch.Tensor, # (b, s, c)
+#     r: int,
+#     class_token: bool = False,
+#     distill_token: bool = False,
+#     padding_mask: Optional[torch.Tensor] = None, # (b, s) # 0 for non padding, 1 for padding
+#     max_r_per_instance: int = None,
+#     specified_threshold: float = None
+# ) -> Tuple[Callable, Callable]:
+#     """
+#     Applies ToMe with a balanced matching set (50%, 50%).
+
+#     Input size is [batch, tokens, channels].
+#     r indicates the number of tokens to remove (max 50% of tokens).
+
+#     Extra args:
+#      - class_token: Whether or not there's a class token.
+#      - distill_token: Whether or not there's also a distillation token.
+
+#     When enabled, the class token and distillation tokens won't get merged.
+#     """
+#     protected = 0
+#     if class_token:
+#         protected += 1
+#     if distill_token:
+#         protected += 1
+
+#     bsz, seq_len, hdim = metric.shape
+
+#     # We can only reduce by a maximum of 50% tokens
+#     t = metric.shape[1]
+#     r = min(r, (t - protected) // 2)
+
+#     if r <= 0:
+#         return do_nothing, do_nothing, None
+
+#     with torch.no_grad():
+        
+#         # compute scores within instance
+#         metric = metric / metric.norm(dim=-1, keepdim=True) # (b, s, c)
+#         # print(metric)
+
+#         a, b = metric[..., ::2, :], metric[..., 1::2, :]
+#         scores = a @ b.transpose(-1, -2) # (b, s//2, s//2)
+
+#         if class_token:
+#             scores[..., 0, :] = -math.inf
+#         if distill_token:
+#             scores[..., :, 0] = -math.inf
+
+#         # add padding mask
+#         if padding_mask is not None:
+#             # Create padding masks for 'a' and 'b'
+#             padding_mask_a = padding_mask[..., ::2]  # Shape: (b, s//2)
+#             padding_mask_b = padding_mask[..., 1::2]  # Shape: (b, s//2)
+
+#             # Unsqueeze to align dimensions for broadcasting
+#             mask_a = padding_mask_a.unsqueeze(2).bool()  # Shape: (b, s//2, 1)
+#             mask_b = padding_mask_b.unsqueeze(1).bool()  # Shape: (b, 1, s//2)
+
+#             # Combine masks to identify where either 'a' or 'b' has padding
+#             combined_mask = mask_a | mask_b  # Shape: (b, s//2, s//2)
+
+#             # Set scores at padding positions to -inf
+#             scores = scores.masked_fill(combined_mask, -math.inf)
+
+#         if max_r_per_instance is not None:
+#             node_max_instance, node_idx_instance = scores.max(dim=-1)
+#             edge_idx_instance = node_max_instance.argsort(dim=-1, descending=True)[..., None]
+#             unm_idx_instance = edge_idx_instance[..., max_r_per_instance:, :] # keep tokens beyond r_max unmerged
+#             unm_idx_instance_expanded = unm_idx_instance.expand(-1, -1, scores.size(-1))
+#             batch_indices = torch.arange(bsz).view(-1, 1, 1).expand_as(unm_idx_instance_expanded)
+#             scores[batch_indices, unm_idx_instance_expanded, :] = -math.inf
+
+#         # flatten across batch
+#         scores = rearrange(scores, 'b i j -> (b i) j')
+
+#         # get the best matching over the batch
+#         node_max, node_idx = scores.max(dim=-1) # (b * s // 2)
+#         edge_idx = node_max.argsort(dim=-1, descending=True)[..., None]
+
+#         if specified_threshold is not None:
+#             rb = sum(node_max > specified_threshold) # merge all tokens over the specified_threshold
+#         else:
+#             rb = r * bsz
+
+#         unm_idx = edge_idx[rb:, :]  # Unmerged Tokens (unmerged_token_num, 1)
+#         src_idx = edge_idx[:rb, :]  # Merged Tokens (rb, 1)
+#         dst_idx = node_idx.gather(dim=0, index=src_idx.squeeze()) # (rb,)
+
+#         if specified_threshold is not None:
+#             batch_threshold = None
+#         else:
+#             # keep track of batch level threshold for this layer
+#             j = rb if rb < len(edge_idx) else len(edge_idx) - 1
+#             batch_threshold = node_max[edge_idx[j, 0]]
+#             batch_threshold = max(batch_threshold, torch.zeros_like(batch_threshold)) # should be non-negative
+#         # print(scores)
+#         if class_token:
+#             # Sort to ensure the class token is at the start
+#             unm_idx = unm_idx.sort(dim=1)[0]
+
+#     def update_dst(dst_flat, src_elements, index_expanded, reduce='sum', include_self=True):
+#         if reduce == 'sum':
+#             # Use scatter_add_ for sum reduction
+#             dst_flat.scatter_add_(
+#                 dim=0,
+#                 index=index_expanded,
+#                 src=src_elements
+#             )
+#         elif reduce == 'mean':
+#             # For mean reduction, we'll need to keep track of counts
+#             counts = torch.zeros_like(dst_flat)
+#             ones = torch.ones_like(src_elements)
+
+#             # Sum the src_elements into dst_flat
+#             sum_dst_flat = torch.zeros_like(dst_flat)
+#             sum_dst_flat.scatter_add_(
+#                 dim=0,
+#                 index=index_expanded,
+#                 src=src_elements
+#             )
+
+#             # Count the number of times each index is updated
+#             counts.scatter_add_(
+#                 dim=0,
+#                 index=index_expanded,
+#                 src=ones
+#             )
+
+#             if include_self:
+#                 # Include original dst values in the mean calculation
+#                 sum_dst_flat += dst_flat
+#                 # counts += (dst_flat != 0).float()
+#                 counts += (dst_flat != 0).to(counts.dtype)
+
+#             # Avoid division by zero
+#             counts = counts.clamp(min=1)
+
+#             # Compute the mean
+#             dst_flat = sum_dst_flat / counts
+#         else:
+#             raise ValueError("Unsupported reduction type. Use 'sum' or 'mean'.")
+
+#         return dst_flat
+
+
+#     def merge(x: torch.Tensor, mode="mean") -> torch.Tensor:
+#         src, dst = x[..., ::2, :], x[..., 1::2, :]  # Shape: (b, s//2, c)
+
+#         # src = rearrange(src, 'b s c -> (b s) c') # (b * s // 2, c)
+#         t1 = src.shape[1]
+#         unm_b = unm_idx.squeeze(-1) // t1
+#         unm_s = unm_idx.squeeze(-1) % t1
+#         src_b = src_idx.squeeze(-1) // t1
+#         src_s = src_idx.squeeze(-1) % t1
+
+#         src_tokens = src[src_b, src_s, :]  # Shape: (b * r, c)
+#         dst_b = src_b
+#         dst_seq_len = dst.size(1)
+#         dst_flat_indices = dst_b * dst_seq_len + dst_idx
+#         dst_flat = dst.reshape(-1, dst.size(-1))
+#         index_expanded = dst_flat_indices.unsqueeze(-1).expand(-1, dst_flat.size(-1))
+#         dst_new = dst_flat.clone()
+#         dst_new = update_dst(dst_new, src_tokens, index_expanded, reduce=mode, include_self=True)
+#         dst_new = dst_new.reshape(dst.size())
+#         # print("dst tokens merged:", dst_new)
+
+#         # # construct new x
+#         x_new = x.clone()
+#         x_new[..., :src.size(1), :] = src
+#         x_new[..., src.size(1):, :] = dst_new
+#         x_new[src_b, src_s, :] = torch.zeros_like(src[src_b, src_s, :])
+#         if padding_mask is not None:
+#             padding_mask_src, padding_mask_dst = padding_mask[..., ::2].clone(), padding_mask[..., 1::2].clone()
+#             padding_mask_src[src_b, src_s] = 1
+#             new_padding_mask = torch.concatenate((padding_mask_src, padding_mask_dst), dim=1)
+#         else:
+#             new_padding_mask = torch.zeros((bsz, seq_len), device=x.device, dtype=x.dtype)
+#             new_padding_mask_a = new_padding_mask[..., ::2].clone()
+#             new_padding_mask_a[src_b, src_s] = 1
+#             new_padding_mask[..., :src.size(1)] = new_padding_mask_a
+        
+#         # # construct padding masking: (b, s); 0 for non-padding, 1 for padding; fill in 1 where x_new is zero
+#         # padding_mask = torch.all(x_new == 0, dim=-1).int().to(x.device)
+#         return x_new, new_padding_mask
+
+
+#     def unmerge(x: torch.Tensor) -> torch.Tensor:
+#         raise NotImplementedError("Unmerge not implemented yet.")
+
+#     return merge, unmerge, batch_threshold
+
+# def batch_level_merge_wavg(
+#     merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None, # (b, s, s_ori)
+#     cls_token: bool = False
+# ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+#     """
+#     Applies the merge function by taking a weighted average based on token size.
+#     Returns the merged tensor and the new token sizes.
+#     """
+#     if size is None:
+#         size = torch.ones_like(x[..., 0, None])
+
+#     x, padding_mask = merge(x * size, mode="sum")
+#     size, _ = merge(size, mode="sum")
+
+#     if pos_tracking is not None:
+#         pos_tracking, _ = merge(pos_tracking, mode="sum")
+
+#     assert padding_mask is not None
+#     if cls_token:
+#         if x.size(1) > 1:
+#             # Separate the cls token (first token)
+#             cls_token_x = x[:, :1, :]
+#             cls_token_padding = padding_mask[:, :1]
+#             cls_token_size = size[:, :1, :]
+#             if pos_tracking is not None:
+#                 cls_token_pos = pos_tracking[:, :1, :]
+#             # Process the rest of the tokens (from index 1 onward)
+#             rest_x = x[:, 1:]
+#             rest_padding_mask = padding_mask[:, 1:]
+#             rest_size = size[:, 1:]
+#             if pos_tracking is not None:
+#                 rest_pos_tracking = pos_tracking[:, 1:]
+#             # Sort only the rest tokens based on the padding mask
+#             sort_indices = torch.argsort(rest_padding_mask, dim=1)
+#             rest_x = rest_x.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, x.size(2)))
+#             rest_padding_mask = rest_padding_mask.gather(1, sort_indices)
+#             rest_size = rest_size.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, size.size(2)))
+#             if pos_tracking is not None:
+#                 rest_pos_tracking = rest_pos_tracking.gather(
+#                     1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2))
+#                 )
+#             # Recombine the unchanged cls token with the sorted tokens
+#             x = torch.cat([cls_token_x, rest_x], dim=1)
+#             padding_mask = torch.cat([cls_token_padding, rest_padding_mask], dim=1)
+#             size = torch.cat([cls_token_size, rest_size], dim=1)
+#             if pos_tracking is not None:
+#                 pos_tracking = torch.cat([cls_token_pos, rest_pos_tracking], dim=1)
+#         else:
+#             # if there is only one token, do nothing
+#             pass
+#     else:
+#         # Rearrange x, padding_mask, and size so that non-padding instances are at the front
+#         # padding_mask is 0 for non-padding and 1 for padding
+#         sort_indices = torch.argsort(padding_mask, dim=1)
+#         # Use gather to rearrange x, padding_mask, and size according to sort_indices
+#         x = x.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, x.size(2)))
+#         padding_mask = padding_mask.gather(1, sort_indices)
+#         size = size.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, size.size(2))) # (b, s, 1)
+#         if pos_tracking is not None:
+#             pos_tracking = pos_tracking.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2)))
+
+#     x = x / (size+1e-4)
+
+#     # Truncate to the maximum length
+#     max_len = int((padding_mask < 0.5).to(torch.int64).sum(dim=-1).max().item()) # 0 for non-padding, 1 for padding
+
+#     x = x[:, :max_len]
+#     padding_mask = padding_mask[:, :max_len]
+#     size = size[:, :max_len]
+#     if pos_tracking is not None:
+#         pos_tracking = pos_tracking[:, :max_len]
+#     return x, size, padding_mask, pos_tracking
+
+
+###############
+###############
+###############
+###############
+###############
+
+
 def batch_level_bipartite_soft_matching(
     metric: torch.Tensor, # (b, s, c)
     r: int,
@@ -239,19 +528,16 @@ def batch_level_bipartite_soft_matching(
 
         # add padding mask
         if padding_mask is not None:
-            # Create padding masks for 'a' and 'b'
-            padding_mask_a = padding_mask[..., ::2]  # Shape: (b, s//2)
-            padding_mask_b = padding_mask[..., 1::2]  # Shape: (b, s//2)
-
-            # Unsqueeze to align dimensions for broadcasting
-            mask_a = padding_mask_a.unsqueeze(2).bool()  # Shape: (b, s//2, 1)
-            mask_b = padding_mask_b.unsqueeze(1).bool()  # Shape: (b, 1, s//2)
+            # padding_mask is 0 for non-padding and 1 for padding
+            mask_a = padding_mask[..., ::2].unsqueeze(2).bool()  # Shape: (b, s//2, 1)
+            mask_b = padding_mask[..., 1::2].unsqueeze(1).bool()  # Shape: (b, 1, s//2)
 
             # Combine masks to identify where either 'a' or 'b' has padding
             combined_mask = mask_a | mask_b  # Shape: (b, s//2, s//2)
 
             # Set scores at padding positions to -inf
-            scores = scores.masked_fill(combined_mask, -math.inf)
+            # scores = scores.masked_fill(combined_mask, -math.inf)
+            scores.masked_fill_(combined_mask, -math.inf)
 
         if max_r_per_instance is not None:
             node_max_instance, node_idx_instance = scores.max(dim=-1)
@@ -269,7 +555,8 @@ def batch_level_bipartite_soft_matching(
         edge_idx = node_max.argsort(dim=-1, descending=True)[..., None]
 
         if specified_threshold is not None:
-            rb = sum(node_max > specified_threshold) # merge all tokens over the specified_threshold
+            # rb = sum(node_max > specified_threshold) # merge all tokens over the specified_threshold
+            rb = int((node_max > specified_threshold).sum().item())
         else:
             rb = r * bsz
 
@@ -350,20 +637,26 @@ def batch_level_bipartite_soft_matching(
         dst_flat_indices = dst_b * dst_seq_len + dst_idx
         dst_flat = dst.reshape(-1, dst.size(-1))
         index_expanded = dst_flat_indices.unsqueeze(-1).expand(-1, dst_flat.size(-1))
-        dst_new = dst_flat.clone()
-        dst_new = update_dst(dst_new, src_tokens, index_expanded, reduce=mode, include_self=True)
+        
+        # 
+        # dst_new = dst_flat.clone()
+        dst_new = update_dst(dst_flat, src_tokens, index_expanded, reduce=mode, include_self=True)
         dst_new = dst_new.reshape(dst.size())
         # print("dst tokens merged:", dst_new)
 
         # # construct new x
-        x_new = x.clone()
-        x_new[..., :src.size(1), :] = src
-        x_new[..., src.size(1):, :] = dst_new
-        x_new[src_b, src_s, :] = torch.zeros_like(src[src_b, src_s, :])
+        # x_new = x.clone()
+        # x[..., :src.size(1), :] = src
+        # x[..., src.size(1):, :] = dst_new
+        x_new = torch.cat([src, dst_new], dim=1)
+        # x_new[src_b, src_s, :] = torch.zeros_like(src[src_b, src_s, :])
+        x_new[src_b, src_s, :] = 0
+
         if padding_mask is not None:
-            padding_mask_src, padding_mask_dst = padding_mask[..., ::2].clone(), padding_mask[..., 1::2].clone()
+            # padding_mask_src, padding_mask_dst = padding_mask[..., ::2].clone(), padding_mask[..., 1::2].clone()
+            padding_mask_src, padding_mask_dst = padding_mask[..., ::2], padding_mask[..., 1::2]
             padding_mask_src[src_b, src_s] = 1
-            new_padding_mask = torch.concatenate((padding_mask_src, padding_mask_dst), dim=1)
+            new_padding_mask = torch.cat([padding_mask_src, padding_mask_dst], dim=1)
         else:
             new_padding_mask = torch.zeros((bsz, seq_len), device=x.device, dtype=x.dtype)
             new_padding_mask_a = new_padding_mask[..., ::2].clone()
@@ -376,61 +669,9 @@ def batch_level_bipartite_soft_matching(
 
 
     def unmerge(x: torch.Tensor) -> torch.Tensor:
-        # TODO: Implement unmerge
         raise NotImplementedError("Unmerge not implemented yet.")
-        # unm_len = unm_idx.shape[1]
-        # unm, dst = x[..., :unm_len, :], x[..., unm_len:, :]
-        # n, _, c = unm.shape
-
-        # src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c))
-
-        # out = torch.zeros(n, metric.shape[1], c, device=x.device, dtype=x.dtype)
-
-        # out[..., 1::2, :] = dst
-        # out.scatter_(dim=-2, index=(2 * unm_idx).expand(n, unm_len, c), src=unm)
-        # out.scatter_(dim=-2, index=(2 * src_idx).expand(n, r, c), src=src)
-        return out
 
     return merge, unmerge, batch_threshold
-
-# def batch_level_merge_wavg(
-#     merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None # (b, s, s_ori)
-# ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-#     """
-#     Applies the merge function by taking a weighted average based on token size.
-#     Returns the merged tensor and the new token sizes.
-#     """
-#     if size is None:
-#         size = torch.ones_like(x[..., 0, None])
-
-#     x, padding_mask = merge(x * size, mode="sum")
-#     size, _ = merge(size, mode="sum")
-
-#     if pos_tracking is not None:
-#         pos_tracking, _ = merge(pos_tracking, mode="sum")
-
-#     if padding_mask is not None:
-#         # Rearrange x, padding_mask, and size so that non-padding instances are at the front
-#         # padding_mask is 0 for non-padding and 1 for padding
-#         sort_indices = torch.argsort(padding_mask, dim=1)
-#         # Use gather to rearrange x, padding_mask, and size according to sort_indices
-#         x = x.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, x.size(2)))
-#         padding_mask = padding_mask.gather(1, sort_indices)
-#         size = size.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, size.size(2))) # (b, s, 1)
-#         if pos_tracking is not None:
-#             pos_tracking = pos_tracking.gather(1, sort_indices.unsqueeze(-1).expand(-1, -1, pos_tracking.size(2)))
-
-#     x = x / size
-
-#     # Truncate to the maximum length
-#     # max_len = int((1 - padding_mask).sum(dim=-1).max().item()) # this causes incorrect max_len calculation
-#     max_len = int((1 - padding_mask).to(torch.int64).sum(dim=-1).max().item())
-#     x = x[:, :max_len]
-#     padding_mask = padding_mask[:, :max_len]
-#     size = size[:, :max_len]
-#     if pos_tracking is not None:
-#         pos_tracking = pos_tracking[:, :max_len]
-#     return x, size, padding_mask, pos_tracking
 
 def batch_level_merge_wavg(
     merge: Callable, x: torch.Tensor, size: torch.Tensor = None, pos_tracking: torch.Tensor = None, # (b, s, s_ori)
@@ -496,8 +737,6 @@ def batch_level_merge_wavg(
     x = x / (size+1e-4)
 
     # Truncate to the maximum length
-    # max_len = int((1 - padding_mask).sum(dim=-1).max().item()) # this causes incorrect max_len calculation
-    # max_len = int((1 - padding_mask).to(torch.int64).sum(dim=-1).max().item()) # 0 for non-padding, 1 for padding
     max_len = int((padding_mask < 0.5).to(torch.int64).sum(dim=-1).max().item()) # 0 for non-padding, 1 for padding
 
     x = x[:, :max_len]
@@ -506,6 +745,15 @@ def batch_level_merge_wavg(
     if pos_tracking is not None:
         pos_tracking = pos_tracking[:, :max_len]
     return x, size, padding_mask, pos_tracking
+
+
+###############
+###############
+###############
+###############
+
+
+
 
 def batch_level_merge_source(
     merge: Callable, x: torch.Tensor, source: torch.Tensor = None
@@ -708,21 +956,37 @@ class ToMEBlock(nn.Module):
                 max_r_per_instance = None
             else:
                 max_r_per_instance = int(self._tome_info["max_r_per_instance_ratio"] * r)
-            merge, _, batch_threshold = batch_level_bipartite_soft_matching(
-                metric,
-                r,
-                self._tome_info["class_token"],
-                self._tome_info["distill_token"],
-                padding_mask = padding_mask,
-                max_r_per_instance = max_r_per_instance,
-                specified_threshold = specified_threshold
-            )
-            if merge != do_nothing:
-                hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
-                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking, cls_token=self._tome_info["class_token"]
+
+            B = hidden_states.shape[0]
+            if specified_threshold is not None and B == 1:
+                # inference time; use efficient instance-level with threshold version
+                merge, _ = bipartite_soft_matching(
+                    metric,
+                    r,
+                    self._tome_info["class_token"],
+                    self._tome_info["distill_token"],
+                    specified_threshold=specified_threshold,
+                    max_r_per_instance=max_r_per_instance
                 )
-                if self.training or self.update_threshold:
-                    self.threshold_running_avg(batch_threshold)
+                hidden_states, self._tome_info["size"], pos_tracking = merge_wavg(
+                    merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking
+                )
+            else:
+                merge, _, batch_threshold = batch_level_bipartite_soft_matching(
+                    metric,
+                    r,
+                    self._tome_info["class_token"],
+                    self._tome_info["distill_token"],
+                    padding_mask = padding_mask,
+                    max_r_per_instance = max_r_per_instance,
+                    specified_threshold = specified_threshold
+                )
+                if merge != do_nothing:
+                    hidden_states, self._tome_info["size"], padding_mask, pos_tracking = batch_level_merge_wavg(
+                        merge, hidden_states, self._tome_info["size"], pos_tracking=pos_tracking, cls_token=self._tome_info["class_token"]
+                    )
+                    if self.training or self.update_threshold:
+                        self.threshold_running_avg(batch_threshold)
             
         return hidden_states, padding_mask, pos_tracking
 
