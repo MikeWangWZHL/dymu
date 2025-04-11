@@ -153,4 +153,6 @@ core.*
 !src/evaluation/misc/results_dbs/*
 datacomp
 
-threshold_checkpoints
+checkpoints/*
+threshold_checkpoints/*
+vlm_checkpoints/*
