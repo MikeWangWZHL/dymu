@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="description"
+        content="DyMU">
+  <meta name="keywords" content="VLM, Visual Encoder">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DyMU: Dynamic Merging and Virtual Unmerging for Efficient VLMs</title>
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
+        rel="stylesheet">
+
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <link rel="icon" href="./static/images/dymu_logo.svg">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <script src="./static/js/index.js"></script>
+
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var toggles = document.querySelectorAll('.toggle-section');
+      toggles.forEach(function(toggle) {
+        toggle.addEventListener('click', function() {
+          var content = document.getElementById(toggle.getAttribute('aria-controls'));
+          content.classList.toggle('is-active');
+          toggle.children[1].classList.toggle('fa-angle-down');
+          toggle.children[1].classList.toggle('fa-angle-up');
+        });
+      });
+    });
+  </script>
+
+  <style>
+    .collapse-content {
+      display: none;
+      margin-top: 10px;
+    }
+    .collapse-content.is-active {
+      display: block;
+    }
+    .toggle-section .icon.is-small {
+      transition: transform 0.3s ease;
+    }
+    .toggle-section .fa-angle-up {
+      transform: rotate(180deg);
+    }
+  </style>
+
+</head>
+<body>
+
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">
+            <img src="static/images/dymu_logo.png" alt="Icon" style="vertical-align: middle; height: 50px; margin-right: 10px; margin-bottom: 9px">
+            DyMU: Dynamic Merging and Virtual Unmerging for Efficient VLMs </h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">
+              <a href="https://mikewangwzhl.github.io/">Zhenhailong Wang</a><sup>1 *</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://www.senthilpurushwalkam.com/">Senthil Purushwalkam</a><sup>2 * </sup>,
+            </span>
+            <span class="author-block">
+              <a href="http://cmxiong.com/">Caiming Xiong</a><sup>2</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://www.salesforce.com/blog/author/silvio-savarese/">Silvio Savarese</a><sup>2</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://blender.cs.illinois.edu/hengji.html">Heng Ji</a><sup>1</sup>
+            </span>
+            <span class="author-block">
+              <a href="https://www.salesforce.com/blog/author/ran-xu/">Ran Xu</a><sup>2</sup>,
+            </span>
+          </div>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>1</sup>University of Illinois Urbana-Champaign,</span>
+            <span class="author-block"><sup>2</sup>Salesforce Research</span>
+          </div>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>*</sup>Equal Contribution</span>
+          </div>
+
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <!-- PDF Link. -->
+              <span class="link-block">
+                <a href=""
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>PDF</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href=""
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                  </span>
+                  <span>arXiv</span>
+                </a>
+              </span>
+              <!-- Video Link. -->
+              <!-- <span class="link-block">
+                <a href="https://github.com/MikeWangWZHL/VDLM/raw/main/static/videos/vdlm_teaser_vid.mp4"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-youtube"></i>
+                  </span>
+                  <span>Video</span>
+                </a>
+              </span> -->
+              <!-- Code Link. -->
+              <span class="link-block">
+                <a href="https://github.com/MikeWangWZHL/dymu"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-github"></i>
+                  </span>
+                  <span>Code</span>
+                  </a>
+              </span>
+              <!-- Model Link. -->
+              <!-- <span class="link-block">
+                <a href="https://huggingface.co/mikewang/PVD-160k-Mistral-7b"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <p style="font-size:18px">🤗</p>
+                  </span>
+                  <span>Model</span>
+                </a> -->
+              <!-- Dataset Link. -->
+              <!-- <span class="link-block">
+                <a href="https://huggingface.co/datasets/mikewang/PVD-160K"
+                class="external-link button is-normal is-rounded is-dark">
+                <span class="icon">
+                  <p style="font-size:18px">🤗</p>
+                </span>
+                <span>Dataset</span>
+              </a> -->
+              <!-- Demo link. -->
+              <!-- <span class="link-block">
+                <a href="https://github.com/MikeWangWZHL/VDLM/blob/main/demo.ipynb"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                    <p style="font-size:18px">🚀</p>
+                  </span>
+                  <span>Demo</span>
+                </a> -->
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <figure>
+        <img src="static/images/teaser_long.png" alt="Dymu teaser." class="dymu_teaser"/>
+        <figcaption class="has-text-centered">
+          <b>Dynamic Merging and Virtual Unmerging (DyMU)</b> adaptively reduces visual token lengths based on image complexity, as shown on the left where simpler images are represented using fewer tokens. In contrast, existing representations (like CLIP) always use the same number of tokens regardless of image content. DyMU applied to VLMs (right) maintains competitive performance across different token compression levels while significantly reducing FLOPs. This training-free approach preserves key semantic information, offering a more efficient plug-and-play alternative to VLMs with fixed-length visual tokens.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+
+<!-- Abstract -->
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>
+            We present DyMU, an efficient, training-free framework that dynamically reduces the computational burden of vision-language models (VLMs) while maintaining high task performance. Our approach comprises two key components. First, <b>Dynamic Token Merging (DToMe)</b> reduces the number of visual token embeddings by merging similar tokens based on image complexity, addressing the inherent inefficiency of fixed-length outputs in vision transformers. Second, <b>Virtual Token Unmerging (VTU)</b> simulates the expected token sequence for large language models (LLMs) by efficiently reconstructing the attention dynamics of a full sequence, thus preserving the downstream performance without additional fine-tuning. Unlike previous approaches, our method dynamically adapts token compression to the content of the image and operates completely training-free, making it readily applicable to most state-of-the-art VLM architectures. Extensive experiments on image and video understanding tasks, demonstrate that DyMU can reduce the average visual token count by 32%-85% while achieving comparable performance to full-length models, across diverse VLM architectures, including the recently popularized AnyRes-based visual encoders. Furthermore, through qualitative analyses we demonstrate that DToMe effectively adapts token reduction based on image complexity, and unlike existing systems, provides users more control over computational costs.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">Method Overview</h2>
+        <div class="content has-text-justified">
+          <figure id="method">
+            <img src="static/images/method.png" alt="method" class="method"/>
+          </figure>
+          <p>
+            <b>Dynamic Token Merging (DToMe):</b> DToMe first determines per-layer thresholds (Left) by feeding a large batch of images into the vision transformer and computing bipartite token similarities. We rank these edges across the <em>entire batch</em> and choose the top-<em>Br</em> (<em>r</em> = desired average number of tokens, batch size <em>B</em>). This leads to more edges from simpler images (with more redundancy) being chosen, while complex images remain less merged. During inference, DToMe merges tokens on a per-image basis using these pre-computed thresholds. 
+          </p>
+          <p>
+            <b>Virtual Token Unmerging (VTU):</b>  We then apply VTU (Right) in the self-attention layers of the pretrained VLM to efficiently expand the attention matrices to the standard token count—ensuring the model's original weights and outputs remain compatible—before re-merging the tokens for the next layer. (See paper for detailed derivations.) The overall process is training-free and utilizes crucial image information by allocating the token budget more effectively for both simple and complex images.
+          </p>
+        </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">Qualitative Results</h2>
+        <br>
+        <!-- <h3 class="title is-4"> Dynamic token length consistent with image complexity </h3> -->
+        <div class="content has-text-justified">
+          <figure id="pvd_ontology_img">
+            <img src="static/images/img_to_tok_grid.png" alt="img_to_tok_grid" class="img_to_tok_grid"/>
+            <figcaption><b>Dynamic token length consistent with image complexity.</b></figcaption>
+          </figure>
+          <figure id="pvd_ontology_img">
+            <img src="static/images/qualitative_v2.png" alt="qualitative_v2" class="qualitative_v2"/>
+            <figcaption><b>More flexible control of visual token length via combining with additional vision tools.</b></figcaption>
+          </figure>
+        </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">Quantative Results</h2>
+        <br>
+        <!-- <h3 class="title is-4"> Dynamic token length consistent with image complexity </h3> -->
+        <div class="content has-text-justified">
+          <figure id="pvd_ontology_img">
+            <img src="static/images/dymu_result_table_llava1.5.png" alt="dymu_result_table_llava1.5" class="dymu_result_table_llava1.5"/>
+            <figcaption><b>Comparison with state-of-the-art methods for improving efficiency on LLaVA 1.5.</b> DyMU-low achieves 97.7% of the
+              original full-length LLaVA baseline's performance while using only ~15% of the tokens. Importantly, DyMU is entirely training-free and
+              generally outperforms previous fixed-length, training-free methods, while also enabling variable-length outputs. For more results on different vision encoders and VLMs, please refer to the paper.</figcaption>
+          </figure>
+        </div>
+  </div>
+</section>
+
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>
+      
+    </code></pre>
+  </div>
+</section>
+
+
+<footer class="footer">
+  <div class="container">
+    <!-- <div class="content has-text-centered">
+      <a class="icon-link"
+      href="">
+      <i class="fas fa-file-pdf"></i>
+    </a>
+    <a class="icon-link" href="https://github.com/mikewangwzhl" class="external-link" disabled>
+      <i class="fab fa-github"></i>
+    </a>
+  </div> -->
+  <div class="content has-text-centered">
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <!-- <p>
+            This website is licensed under a <a rel="license"
+                                                href="http://creativecommons.org/licenses/by-sa/4.0/">Creative
+            Commons Attribution-ShareAlike 4.0 International License</a>.
+          </p> -->
+          <p>
+            This website's template is borrowed from <a
+              href="https://github.com/nerfies/nerfies.github.io">nerfies</a>. We thank the authors for open-sourcing their code.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

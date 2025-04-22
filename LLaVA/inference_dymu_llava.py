@@ -20,7 +20,6 @@ def find_thresholds(threshold_finding_checkpoint):
 
 ## path to the saved encoder checkpoint for getting the thresholds ##
 threshold_checkpoint_path = "checkpoints/threshold_checkpoints/ViT-L-14-336-tome-72out.pth"
-# threshold_checkpoint_path = "/shared/nas2/wangz3/salesforce_intern_nas2/open_clip_merging/LLaVA/checkpoints/shared_by_senthil/tome_nofinetune_clsbugfix/threshold_checkpoints/ViT-L-14-336-tome-72out.pth"
 
 # path to the pretrained checkpoint with config.json modified
 model_path = "vlm_checkpoints/llava-v1.5-7b"

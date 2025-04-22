@@ -81,6 +81,7 @@ pip install -e .
 ## Threshold Finding with DToMe
 TODO: senthil please add details
 
+
 ## Inference
 
 Download DyMU encoder checkpoints with pre-computed from [here](https://huggingface.co/mikewang/DyMU/tree/main).
@@ -121,8 +122,12 @@ Make sure the VLM specific installation for the expected VLM is done as describe
     ```
 
 ### Implementation Notes
-- In the paper, we analyze the efficiency gain with Virtual Token Unmerging (VTU) on both MLP layers and Self-Attention layers. Although it theoretical holds that VTU can bring additional speed up during self-attention, we find that in practice, the customized attention operation is slower than directly using matmul on the expanded sequence (where merged tokens are repeated). This is because the .matmul function in PyTorch is highly optimized for long sequences — the overhead caused by the increased number of individual multiplications in the decomposed attention outweighs the benefits of reduced matrix dimensions. Therefore, by default, we use the faster, simple implementation. Nevertheless, for reference, we also include an implementation that strictly follows the VTU decomposition described in the paper, located in `LLaVA/llava/model/language_model/vtu_attention_exact_imple.py`, where we provide the `CustomLlamaAttention` class. We encourage readers to explore further improvements to its efficiency.
-- For LLaVA-One-Vision, the input to the encoder is a batch of image crops. In DyMU, since each crop can have a variable number of remaining tokens after each layer, we need to pad the sequences, which introduces additional computational overhead. This can make DyMU on LLaVA-One-Vision noticeably slower than ToMe, which performs instance-level merging and maintains a constant number of tokens at each layer.
+
+- In the paper, we demonstrate efficiency gains in terms of FLOPs using Virtual Token Unmerging (VTU) within Self-Attention blocks. However, in practice, we find that directly expanding Q and K to their full lengths and leveraging highly optimized sdpa or a single matmul function leads to shorter wall clock time. Therefore, we default to this faster, simpler implementation.
+For completeness, we also provide an implementation that strictly follows the exact VTU attention decomposition, located in `LLaVA/llava/model/language_model/llava_llama_w_exact_vtu_attn.py`. This can be used as a direct drop-in replacement for `LLaVA/llava/model/language_model/llava_llama.py`. We encourage readers to explore further optimizations to reduce the wall clock time of the exact VTU attention.
+Note: When using the exact VTU implementation, please explicitly set `attn_implementation` to `eager` when loading the model via from_pretrained.
+
+- For LLaVA-One-Vision, the input to the encoder is a batch of image crops. In DyMU, since each crop may retain a variable number of tokens after each layer, sequence padding is required, which introduces additional computational overhead. We experimented with adding token packing via a custom Triton kernel, but it currently results in worse wall clock time. Thus we default to the with-padding version. We encourage further exploration of optimization strategies.
 
 ### Acknowledgement
 The codebase is based on amazing repos including: [open_clip](https://github.com/mlfoundations/open_clip.git), [llava](https://github.com/haotian-liu/LLaVA.git), [llava-next](https://github.com/LLaVA-VL/LLaVA-NeXT.git)

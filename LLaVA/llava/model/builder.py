@@ -28,6 +28,12 @@ from transformers import AutoConfig
 def load_pretrained_model(model_path, model_base, model_name, tome_kwargs = None, load_8bit=False, load_4bit=False, device_map="auto", device="cuda", use_flash_attn=False, dtype=torch.float16, **kwargs):
     kwargs = {"device_map": device_map, **kwargs}
 
+    ## Uncomment this if you are using the exact vtu attention ###
+    # if tome_kwargs is not None:
+    #     kwargs['attn_implementation'] = "eager"
+    #     print("Using eager type for exact VTU implementation!")
+    ###
+
     if device != "cuda":
         kwargs['device_map'] = {"": device}
 
