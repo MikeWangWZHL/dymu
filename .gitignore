@@ -139,7 +139,7 @@ dmypy.json
 sync.sh
 gpu1sync.sh
 .idea
-*.pdf
+# *.pdf
 **/._*
 **/*DS_*
 **.jsonl
