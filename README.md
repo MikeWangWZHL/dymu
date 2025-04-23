@@ -7,13 +7,13 @@
 </div>
 
 <p align="center">
-<a href="">🌐 Homepage</a>
+<a href="https://mikewangwzhl.github.io/dymu/">🌐 Homepage</a>
 •
 <a href="">🗃️ arXiv</a>
 •
 <a href="">📃 PDF </a>
 •
-<a href="">💻 Code</a>
+<a href="https://github.com/MikeWangWZHL/dymu">💻 Code</a>
 •
 <a href="https://huggingface.co/mikewang/DyMU/tree/main" >🤗 Models</a>
 
