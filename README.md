@@ -11,7 +11,7 @@
 •
 <a href="">🗃️ arXiv</a>
 •
-<a href="https://github.com/MikeWangWZHL/dymu/static/pdf/dymu_apr23.pdf">📃 PDF </a>
+<a href="https://github.com/MikeWangWZHL/dymu/blob/main/static/pdf/dymu_apr23.pdf">📃 PDF </a>
 •
 <a href="https://github.com/MikeWangWZHL/dymu">💻 Code</a>
 •
