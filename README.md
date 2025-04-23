@@ -65,8 +65,7 @@ pip install -e .
       ```
 2. Upgrade several pip modules for compatibility with open_clip:
     ```
-    pip install --upgrade transformers accelerate sentencepiece deepspeed peft
-    pip install line-profiler
+    pip install --upgrade transformers accelerate sentencepiece deepspeed peft line-profiler
     pip install torch-scatter -f https://data.pyg.org/whl/torch-2.1.2+cu121.html
     pip install --upgrade timm ipdb
     ```
@@ -79,7 +78,25 @@ pip install -e .
 
   
 ## Threshold Finding with DToMe
-TODO: senthil please add details
+The threshold finding only requires inferencing on a set of images. A sufficiently large (e.g., 250K) and diverse dataset would be ideal. The thresholds will be stored as an avaraged statistic across all batches. The key function for doing DToMe can be found in `src/open_clip/tome.py` `batch_level_bipartite_soft_matching()`
+
+- Preparing image dataset: prepare a JSON file with the following format:
+  ```
+    [
+      {
+        "image": "cat1.jpg" # relative path to the image in your image directory
+      },
+      {
+        "image": "dog2.png"
+      },
+    ...
+    ]
+  ```
+
+- Run threshold finding: please find the example script in:
+  ```
+    bash threshold_finding.sh
+  ```
 
 
 ## Inference

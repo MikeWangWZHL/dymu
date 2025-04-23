@@ -471,15 +471,6 @@ def batch_level_merge_wavg(
         pos_tracking = pos_tracking[:, :max_len]
     return x, size, padding_mask, pos_tracking
 
-
-###############
-###############
-###############
-###############
-
-
-
-
 def batch_level_merge_source(
     merge: Callable, x: torch.Tensor, source: torch.Tensor = None
 ) -> torch.Tensor:

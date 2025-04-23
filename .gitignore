@@ -156,3 +156,4 @@ datacomp
 checkpoints/*
 threshold_checkpoints/*
 vlm_checkpoints/*
+dataset*

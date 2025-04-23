@@ -11,7 +11,12 @@ from PIL import Image
 import tqdm
 import open_clip
 import json
-from llava.model.multimodal_encoder.tome_encoder import SigLipVisionModelTome, SigLipVisionConfigTome, SigLipImageProcessor
+
+try:
+    # for llava ov encoder:
+    from llava.model.multimodal_encoder.tome_encoder import SigLipVisionModelTome, SigLipVisionConfigTome, SigLipImageProcessor
+except ImportError:
+    print("Please follow LLaVA-Next env setup for threshold finding with Llava-one-vision Siglip encoders.")
 
 def setup_distributed():
     dist.init_process_group("nccl")
