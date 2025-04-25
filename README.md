@@ -9,7 +9,7 @@
 <p align="center">
 <a href="https://mikewangwzhl.github.io/dymu/">🌐 Homepage</a>
 •
-<a href="">🗃️ arXiv</a>
+<a href="https://arxiv.org/abs/2504.17040">🗃️ arXiv</a>
 •
 <a href="https://github.com/MikeWangWZHL/dymu/blob/main/static/pdf/dymu_apr23.pdf">📃 PDF </a>
 •
@@ -146,5 +146,21 @@ Note: When using the exact VTU implementation, please explicitly set `attn_imple
 
 - For LLaVA-One-Vision, the input to the encoder is a batch of image crops. In DyMU, since each crop may retain a variable number of tokens after each layer, sequence padding is required, which introduces additional computational overhead. We experimented with adding token packing via a custom Triton kernel, but it currently results in worse wall clock time. Thus we default to the with-padding version. We encourage further exploration of optimization strategies.
 
+### Citation
+
+```bibtex
+@misc{wang2025dymudynamicmergingvirtual,
+  title={DyMU: Dynamic Merging and Virtual Unmerging for Efficient VLMs}, 
+  author={Zhenhailong Wang and Senthil Purushwalkam and Caiming Xiong and Silvio Savarese and Heng Ji and Ran Xu},
+  year={2025},
+  eprint={2504.17040},
+  archivePrefix={arXiv},
+  primaryClass={cs.CV},
+  url={https://arxiv.org/abs/2504.17040}, 
+}
+```
+
+
 ### Acknowledgement
 The codebase is based on amazing repos including: [open_clip](https://github.com/mlfoundations/open_clip.git), [llava](https://github.com/haotian-liu/LLaVA.git), [llava-next](https://github.com/LLaVA-VL/LLaVA-NeXT.git)
+
